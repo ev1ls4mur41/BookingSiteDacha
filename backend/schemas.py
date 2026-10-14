@@ -142,10 +142,19 @@ class BookingOut(BaseModel):
     status: str
     comment: str
     created_at: datetime
+    # вложенный listing всегда сериализуется через ListingOut
+    # (в БД images хранится строкой через запятую — конвертирует validator ниже)
     listing: Optional[ListingOut] = None
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
+
+    @field_validator("listing", mode="before")
+    @classmethod
+    def normalize_listing(cls, v):
+        """ORM-объект Listing -> ListingOut (images: Text-строка -> список URL)."""
+        if v is None or isinstance(v, (dict, BaseModel)):
+            return v
+        return ListingOut.from_orm_any(v)
 
 
 class AvailabilityRange(BaseModel):
