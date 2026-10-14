@@ -23,7 +23,8 @@ class Listing(Base):
     bedrooms = Column(Integer, nullable=False, default=1)
     price_per_night = Column(Float, nullable=False, default=0)   # цена за ночь, руб.
     rating = Column(Float, nullable=False, default=4.5)
-    image_url = Column(String(500), nullable=False, default="")
+    image_url = Column(String(500), nullable=False, default="")   # главная (обложка)
+    images = Column(Text, nullable=False, default="")             # все фото: URL через запятую
     amenities = Column(String(500), nullable=False, default="")  # через запятую
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)

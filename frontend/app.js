@@ -106,11 +106,14 @@ async function openDetail(id) {
       .split(",").map((a) => a.trim()).filter(Boolean)
       .map((a) => `<span class="badge">${esc(a)}</span>`).join("");
 
+    const imgs = (currentListing.images && currentListing.images.length)
+      ? currentListing.images
+      : (currentListing.image_url ? [currentListing.image_url] : []);
+
     $("detail-content").innerHTML = `
       <div class="detail">
         <div>
-          <img class="detail-img" src="${currentListing.image_url}" alt="${esc(currentListing.title)}"
-               onerror="this.style.display='none'" />
+          ${imgs.length ? renderGallery(imgs) : ""}
           <h2 style="margin-top:18px">${esc(currentListing.title)}</h2>
           <div class="meta">${TYPE_LABEL[currentListing.property_type]} · ${esc(currentListing.city)}, ${esc(currentListing.address)} · ⭐ ${currentListing.rating.toFixed(1)}</div>
           <div class="badges">
@@ -133,6 +136,95 @@ async function openDetail(id) {
     alert("Не удалось загрузить объект: " + err.message);
   }
 }
+
+// ---------- Галерея фото объекта ----------
+let galleryIdx = 0;
+
+function renderGallery(imgs) {
+  galleryIdx = 0;
+  const thumbs = imgs.length > 1
+    ? `<div class="gal-thumbs">${imgs.map((u, i) => `
+        <img src="${esc(u)}" class="gal-thumb${i === 0 ? " active" : ""}" data-i="${i}"
+             onclick="galleryShow(${i})" alt="фото ${i + 1}" loading="lazy"
+             onerror="this.style.visibility='hidden'" />`).join("")}</div>`
+    : "";
+  return `
+    <div class="gallery">
+      <div class="gal-main">
+        <button class="gal-arrow gal-prev" onclick="galleryShift(-1)" aria-label="Назад" ${imgs.length < 2 ? "style='display:none'" : ""}>‹</button>
+        <img id="gal-main-img" src="${esc(imgs[0])}" alt="${esc(currentListing.title)}"
+             onclick="openLightbox()" onerror="this.style.display='none'" />
+        <button class="gal-arrow gal-next" onclick="galleryShift(1)" aria-label="Вперёд" ${imgs.length < 2 ? "style='display:none'" : ""}>›</button>
+        ${imgs.length > 1 ? `<span class="gal-counter" id="gal-counter">1 / ${imgs.length}</span>` : ""}
+      </div>
+      ${thumbs}
+    </div>`;
+}
+
+function galleryShift(delta) {
+  const imgs = currentListing?.images || [];
+  if (!imgs.length) return;
+  galleryIdx = (galleryIdx + delta + imgs.length) % imgs.length;
+  galleryShow(galleryIdx);
+}
+
+function galleryShow(i) {
+  const imgs = currentListing?.images || [];
+  if (!imgs[i]) return;
+  galleryIdx = i;
+  const main = $("gal-main-img");
+  if (main) { main.style.display = "block"; main.src = imgs[i]; }
+  const counter = $("gal-counter");
+  if (counter) counter.textContent = `${i + 1} / ${imgs.length}`;
+  document.querySelectorAll(".gal-thumb").forEach((t) =>
+    t.classList.toggle("active", Number(t.dataset.i) === i));
+}
+
+function openLightbox() {
+  const imgs = currentListing?.images || [];
+  if (!imgs.length) return;
+  let box = $("lightbox");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "lightbox";
+    box.className = "modal hidden";
+    box.innerHTML = `
+      <div class="lb-box" onclick="event.stopPropagation()">
+        <button class="lb-close" onclick="closeLightbox()">✕</button>
+        <button class="gal-arrow lb-prev" onclick="lbShift(-1)">‹</button>
+        <img id="lb-img" src="" alt="" />
+        <button class="gal-arrow lb-next" onclick="lbShift(1)">›</button>
+        <span class="gal-counter lb-counter" id="lb-counter"></span>
+      </div>`;
+    box.onclick = closeLightbox;
+    document.body.appendChild(box);
+  }
+  $("lb-img").src = imgs[galleryIdx] || imgs[0];
+  $("lb-counter").textContent = imgs.length > 1 ? `${galleryIdx + 1} / ${imgs.length}` : "";
+  box.classList.remove("hidden");
+}
+
+function lbShift(delta) {
+  const imgs = currentListing?.images || [];
+  if (!imgs.length) return;
+  galleryIdx = (galleryIdx + delta + imgs.length) % imgs.length;
+  $("lb-img").src = imgs[galleryIdx];
+  $("lb-counter").textContent = `${galleryIdx + 1} / ${imgs.length}`;
+  galleryShow(galleryIdx);
+}
+
+function closeLightbox() {
+  const box = $("lightbox");
+  if (box) box.classList.add("hidden");
+}
+
+document.addEventListener("keydown", (e) => {
+  const box = $("lightbox");
+  if (!box || box.classList.contains("hidden")) return;
+  if (e.key === "Escape") closeLightbox();
+  if (e.key === "ArrowLeft") lbShift(-1);
+  if (e.key === "ArrowRight") lbShift(1);
+});
 
 // ---------- Календарь занятости ----------
 const CAL_MONTHS = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];

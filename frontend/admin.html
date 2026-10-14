@@ -72,10 +72,65 @@
 
       <!-- Объекты -->
       <div id="tab-listings" class="hidden">
+        <div style="margin: 6px 0 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px">
+          <span style="color:var(--gray); font-size:14px">✏️ Клик по строке — редактирование объекта прямо здесь. 🖼 Можно несколько фото: загрузка с диска или URL.</span>
+          <button class="btn btn-primary" onclick="openListingEditor(null)">＋ Новый объект</button>
+        </div>
         <div class="table-wrap"><table class="admin-table" id="listings-table"></table></div>
       </div>
     </section>
   </main>
+
+  <!-- ===== Редактор объекта (модалка) ===== -->
+  <div id="listing-modal" class="modal hidden">
+    <div class="modal-box editor-box">
+      <div class="editor-head">
+        <h3 id="editor-title">Редактировать объект</h3>
+        <button class="lb-close" onclick="closeListingEditor()">✕</button>
+      </div>
+      <form id="listing-form" class="listing-editor">
+        <input type="hidden" id="ed-id" />
+        <div class="ed-grid">
+          <label class="ed-full">Название *<input type="text" id="ed-title" required minlength="3" /></label>
+          <label>Город *<input type="text" id="ed-city" required minlength="2" /></label>
+          <label>Тип
+            <select id="ed-type"><option value="room">Номер</option><option value="apartment">Квартира</option></select>
+          </label>
+          <label class="ed-full">Адрес<input type="text" id="ed-address" /></label>
+          <label>Цена за ночь, ₽ *<input type="number" id="ed-price" min="0" step="50" required /></label>
+          <label>Вместимость (гостей)<input type="number" id="ed-guests" min="1" max="20" required /></label>
+          <label>Спален / комнат<input type="number" id="ed-bedrooms" min="0" max="20" /></label>
+          <label>Рейтинг (0–5)<input type="number" id="ed-rating" min="0" max="5" step="0.1" /></label>
+          <label class="ed-full">Удобства (через запятую)<input type="text" id="ed-amenities" placeholder="Wi-Fi, Кухня, Парковка" /></label>
+          <label class="ed-full">Описание<textarea id="ed-description" rows="4"></textarea></label>
+          <label class="ed-full">Показывать на сайте
+            <select id="ed-active"><option value="1">Да — активен</option><option value="0">Нет — скрыт</option></select>
+          </label>
+        </div>
+
+        <div class="ed-images">
+          <div class="ed-images-head">
+            <b>🖼 Фотографии <span id="ed-img-count" style="color:var(--gray);font-weight:400"></span></b>
+            <span style="color:var(--gray);font-size:12px">первое фото — обложка в поиске; клик по фото делает его обложкой</span>
+          </div>
+          <div id="ed-img-grid" class="ed-img-grid"></div>
+          <div class="ed-img-add">
+            <input type="file" id="ed-file" accept="image/*" multiple class="hidden" />
+            <button type="button" class="btn btn-ghost" onclick="$('ed-file').click()">⬆ Загрузить с компьютера</button>
+            <input type="text" id="ed-img-url" placeholder="или вставьте ссылку https://…" />
+            <button type="button" class="btn btn-ghost" onclick="addImageUrl()">＋ URL</button>
+          </div>
+        </div>
+
+        <div id="ed-error" class="error hidden"></div>
+        <div class="editor-actions">
+          <button type="submit" class="btn btn-primary btn-lg" id="ed-save">💾 Сохранить</button>
+          <button type="button" class="btn btn-danger hidden" id="ed-delete" onclick="deleteListingFromEditor()">🗑 Удалить объект</button>
+          <button type="button" class="btn btn-ghost" onclick="closeListingEditor()">Отмена</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <footer class="footer">
     <div class="container">StayEasy Admin © 2026 · <a href="/docs" target="_blank">API</a></div>
