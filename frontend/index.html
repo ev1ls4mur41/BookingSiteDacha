@@ -15,6 +15,7 @@
       <nav class="nav">
         <button class="nav-btn active" data-page="search" onclick="showPage('search')">Поиск</button>
         <button class="nav-btn" data-page="bookings" onclick="showPage('bookings')">Мои брони</button>
+        <a class="nav-btn" href="/admin">Админка</a>
       </nav>
     </div>
   </header>
@@ -95,6 +96,7 @@
         <input type="email" id="lookup-email" placeholder="Введите ваш e-mail, чтобы найти брони" />
         <button class="btn btn-primary" onclick="loadMyBookings()">Найти</button>
       </div>
+      <p style="color:var(--gray); font-size:13px; margin-bottom:16px">📅 Занятость по датам видна прямо в календаре на странице каждого объекта — выбирайте свободные дни до оформления брони.</p>
       <div id="bookings-list"></div>
     </section>
   </main>

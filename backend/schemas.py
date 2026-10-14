@@ -106,3 +106,15 @@ class AvailabilityRange(BaseModel):
 
 class ErrorDetail(BaseModel):
     detail: str
+
+
+# ---------- Календарь / админка ----------
+
+class CalendarDay(BaseModel):
+    date: date
+    status: str  # free | booked | past
+
+
+class AdminLogin(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)

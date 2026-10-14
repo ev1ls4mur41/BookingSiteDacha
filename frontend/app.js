@@ -124,12 +124,159 @@ async function openDetail(id) {
           <div><span class="big">${fmtPrice(currentListing.price_per_night)}</span> <span class="per">/ ночь</span></div>
           <p class="per" style="margin:10px 0 16px">Бесплатная отмена до заезда. Оплата на месте.</p>
           <button class="btn btn-primary btn-lg" style="width:100%" onclick="openBookingForm()">Забронировать</button>
+          ${renderCalendar(currentListing.id)}
         </div>
       </div>`;
     showPage("detail");
+    loadCalendar();
   } catch (err) {
     alert("Не удалось загрузить объект: " + err.message);
   }
+}
+
+// ---------- Календарь занятости ----------
+const CAL_MONTHS = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+const CAL_WEEKDAYS = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
+let calYear = null, calMonth = null; // 1..12
+let calDays = {};   // "YYYY-MM-DD" -> free|booked|past
+let selStart = null, selEnd = null;  // выбранные гостем даты (ISO-строки)
+
+function renderCalendar(id) {
+  const now = new Date();
+  if (calYear === null) { calYear = now.getFullYear(); calMonth = now.getMonth() + 1; }
+  return `
+    <div class="calendar" id="calendar">
+      <div class="cal-head">
+        <button class="cal-nav" onclick="calShift(-1)" aria-label="Предыдущий месяц">‹</button>
+        <b id="cal-title">${CAL_MONTHS[calMonth - 1]} ${calYear}</b>
+        <button class="cal-nav" onclick="calShift(1)" aria-label="Следующий месяц">›</button>
+      </div>
+      <div class="cal-grid cal-weekdays">${CAL_WEEKDAYS.map((w) => `<span>${w}</span>`).join("")}</div>
+      <div class="cal-grid" id="cal-days"><div class="cal-loading">Загрузка занятости…</div></div>
+      <div class="cal-legend">
+        <span><i class="dot dot-free"></i> свободно</span>
+        <span><i class="dot dot-booked"></i> занято</span>
+        <span><i class="dot dot-sel"></i> ваш выбор</span>
+      </div>
+      <div class="cal-selection" id="cal-selection">Выберите даты прямо в календаре — занятые дни недоступны.</div>
+    </div>`;
+}
+
+function calShift(delta) {
+  let m = calMonth + delta, y = calYear;
+  if (m < 1) { m = 12; y--; }
+  if (m > 12) { m = 1; y++; }
+  const today = new Date();
+  if (y < today.getFullYear() || (y === today.getFullYear() && m < today.getMonth() + 1)) return;
+  calMonth = m; calYear = y;
+  $("cal-title").textContent = `${CAL_MONTHS[m - 1]} ${y}`;
+  loadCalendar();
+}
+
+async function loadCalendar() {
+  const box = $("cal-days");
+  if (!box || !currentListing) return;
+  try {
+    const res = await fetch(`${API}/listings/${currentListing.id}/calendar?year=${calYear}&month=${calMonth}`);
+    if (!res.ok) throw new Error(await extractError(res));
+    const data = await res.json();
+    calDays = {};
+    data.days.forEach((d) => (calDays[d.date] = d.status));
+    drawCalendarGrid();
+  } catch (err) {
+    box.innerHTML = `<div class="cal-loading">Календарь недоступен: ${esc(err.message)}</div>`;
+  }
+}
+
+function isoOf(y, m, d) {
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+function drawCalendarGrid() {
+  const box = $("cal-days");
+  if (!box) return;
+  const first = new Date(calYear, calMonth - 1, 1);
+  const lead = (first.getDay() + 6) % 7; // Пн=0
+  const dim = new Date(calYear, calMonth, 0).getDate();
+  let html = "";
+  for (let i = 0; i < lead; i++) html += "<span></span>";
+  for (let d = 1; d <= dim; d++) {
+    const iso = isoOf(calYear, calMonth, d);
+    const st = calDays[iso] || "free";
+    let cls = "cal-day " + st;
+    if (selStart && selEnd && iso >= selStart && iso < selEnd) cls += " in-range";
+    if (selStart && iso === selStart) cls += " sel-edge";
+    if (selEnd && iso === selEnd) cls += " sel-edge"; // день выезда подсвечиваем рамкой
+    if (st === "free") {
+      html += `<button class="${cls}" onclick="calPick('${iso}')">${d}</button>`;
+    } else {
+      html += `<span class="${cls}">${d}</span>`;
+    }
+  }
+  box.innerHTML = html;
+  updateCalSelection();
+}
+
+function rangeBlocked(fromIso, toIso) {
+  // проверка: все ночи [from, to) должны быть free и не past
+  let d = new Date(fromIso + "T00:00:00");
+  const end = new Date(toIso + "T00:00:00");
+  while (d < end) {
+    const iso = d.toISOString().slice(0, 10);
+    const st = calDays[iso];
+    if (st === "booked" || st === "past") return true;
+    d.setDate(d.getDate() + 1);
+  }
+  return false;
+}
+
+function calPick(iso) {
+  if (!selStart || (selStart && selEnd)) {
+    // начало нового выбора
+    selStart = iso; selEnd = null;
+  } else if (iso <= selStart) {
+    selStart = iso; // сдвигаем заезд
+  } else {
+    // выезд — можно выбрать даже "занятый" день (это день освобождения),
+    // но все ночи между должны быть свободны
+    if (rangeBlocked(selStart, iso)) {
+      flashCalMsg("Между выбранными датами есть занятые дни ⛔", true);
+      selStart = iso; selEnd = null;
+    } else {
+      selEnd = iso;
+    }
+  }
+  syncCalToForm();
+  drawCalendarGrid();
+}
+
+function syncCalToForm() {
+  if (selStart) $("b-checkin").value = selStart;
+  if (selEnd) $("b-checkout").value = selEnd;
+  recalcTotal();
+}
+
+function updateCalSelection() {
+  const el = $("cal-selection");
+  if (!el) return;
+  if (selStart && selEnd) {
+    const nights = Math.round((new Date(selEnd) - new Date(selStart)) / 86400000);
+    el.innerHTML = `📅 Заезд <b>${selStart}</b> → выезд <b>${selEnd}</b> · ${nights} ноч.`;
+    el.classList.remove("cal-warn");
+  } else if (selStart) {
+    el.textContent = "Теперь выберите дату выезда.";
+    el.classList.remove("cal-warn");
+  } else {
+    el.textContent = "Выберите даты прямо в календаре — занятые дни недоступны.";
+    el.classList.remove("cal-warn");
+  }
+}
+
+function flashCalMsg(text, warn) {
+  const el = $("cal-selection");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("cal-warn", !!warn);
 }
 
 // ---------- Форма бронирования ----------
@@ -142,9 +289,9 @@ function openBookingForm() {
       <span style="color:var(--gray)">${esc(l.city)}, ${esc(l.address)} · ${fmtPrice(l.price_per_night)}/ночь</span>
     </div>`;
 
-  // переносим даты из поиска, если заданы
-  $("b-checkin").value = $("f-checkin").value || "";
-  $("b-checkout").value = $("f-checkout").value || "";
+  // даты берутся из выбора в календаре, иначе — из поиска
+  $("b-checkin").value = selStart || $("f-checkin").value || "";
+  $("b-checkout").value = selEnd || $("f-checkout").value || "";
   $("b-guests").value = $("f-guests").value || 1;
   $("b-guests").max = l.guests;
   $("booking-error").classList.add("hidden");
@@ -246,8 +393,9 @@ function renderBookingItem(b) {
 
 async function cancelBooking(id) {
   if (!confirm("Отменить бронь #" + id + "?")) return;
+  const email = $("lookup-email").value.trim();
   try {
-    const res = await fetch(`${API}/bookings/${id}`, { method: "DELETE" });
+    const res = await fetch(`${API}/bookings/${id}?guest_email=${encodeURIComponent(email)}`, { method: "DELETE" });
     if (!res.ok) throw new Error(await extractError(res));
     loadMyBookings();
   } catch (err) {
@@ -255,8 +403,37 @@ async function cancelBooking(id) {
   }
 }
 
+// ---------- live-проверка занятости при смене дат в форме ----------
+async function liveAvailabilityCheck() {
+  const ci = $("b-checkin").value, co = $("b-checkout").value;
+  const box = $("booking-error");
+  if (!currentListing || !ci || !co || new Date(co) <= new Date(ci)) return;
+  try {
+    const res = await fetch(`${API}/listings/${currentListing.id}/availability?check_in=${ci}&check_out=${co}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.available) {
+      box.textContent = "⚠️ Эти даты только что заняли. Выберите другие в календаре на странице объекта.";
+      box.classList.remove("hidden");
+    } else {
+      box.classList.add("hidden");
+    }
+  } catch (_) {}
+}
+
+["b-checkin", "b-checkout"].forEach((id) => $(id).addEventListener("change", liveAvailabilityCheck));
+
 // ---------- Инициализация ----------
 (async function init() {
+  // сброс выбора календаря при входе на страницу объекта
+  const origOpen = openDetail;
+  window.openDetail = async function (id) {
+    selStart = null; selEnd = null; calDays = {};
+    const now = new Date();
+    calYear = now.getFullYear(); calMonth = now.getMonth() + 1;
+    await origOpen(id);
+  };
+
   // ставим минимальную дату заезда = сегодня
   const today = new Date().toISOString().slice(0, 10);
   $("f-checkin").min = today;
@@ -267,4 +444,9 @@ async function cancelBooking(id) {
   // первичная загрузка всех объектов
   const res = await fetch(`${API}/listings`);
   if (res.ok) renderListings(await res.json());
+
+  // прямая ссылка /?listing=ID — открыть карточку объекта (для админки)
+  const params = new URLSearchParams(location.search);
+  const lid = Number(params.get("listing"));
+  if (lid > 0) openDetail(lid);
 })();
