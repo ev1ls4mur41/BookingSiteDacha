@@ -1,6 +1,1 @@
-__pycache__/
-*.pyc
-*.db
-venv/
-.venv/
-.env
+*.bundle
