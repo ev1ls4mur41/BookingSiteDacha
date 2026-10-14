@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StayEasy — бронирование номеров и квартир</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="container header-inner">
+      <a href="#" class="logo" onclick="showPage('search'); return false;">
+        🏠 Stay<span>Easy</span>
+      </a>
+      <nav class="nav">
+        <button class="nav-btn active" data-page="search" onclick="showPage('search')">Поиск</button>
+        <button class="nav-btn" data-page="bookings" onclick="showPage('bookings')">Мои брони</button>
+        <a class="nav-btn" href="/admin">Админка</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- ===== Страница поиска ===== -->
+    <section id="page-search">
+      <div class="hero">
+        <h1>Номера и квартиры для вашего путешествия</h1>
+        <p>Бронируйте онлайн за пару минут — без предоплаты и звонков</p>
+      </div>
+
+      <form class="search-bar" id="search-form">
+        <label>
+          <span>Город</span>
+          <input type="text" id="f-city" placeholder="Например, Сочи" />
+        </label>
+        <label>
+          <span>Тип</span>
+          <select id="f-type">
+            <option value="">Любой</option>
+            <option value="apartment">Квартира</option>
+            <option value="room">Номер</option>
+          </select>
+        </label>
+        <label>
+          <span>Заезд</span>
+          <input type="date" id="f-checkin" />
+        </label>
+        <label>
+          <span>Выезд</span>
+          <input type="date" id="f-checkout" />
+        </label>
+        <label>
+          <span>Гости</span>
+          <input type="number" id="f-guests" min="1" max="20" value="1" />
+        </label>
+        <label>
+          <span>Цена до, ₽</span>
+          <input type="number" id="f-maxprice" min="0" step="500" placeholder="не важно" />
+        </label>
+        <button type="submit" class="btn btn-primary">Найти</button>
+      </form>
+
+      <div id="results-info" class="results-info"></div>
+      <div id="listings" class="cards-grid"></div>
+    </section>
+
+    <!-- ===== Страница детализации объекта ===== -->
+    <section id="page-detail" class="hidden">
+      <button class="back-link" onclick="showPage('search')">← Вернуться к поиску</button>
+      <div id="detail-content"></div>
+    </section>
+
+    <!-- ===== Страница бронирования ===== -->
+    <section id="page-booking" class="hidden">
+      <button class="back-link" onclick="openDetail(currentListingId)">← Назад к объекту</button>
+      <h2>Оформление брони</h2>
+      <div id="booking-summary" class="booking-summary"></div>
+      <form id="booking-form" class="booking-form">
+        <label>Имя и фамилия *<input type="text" id="b-name" required minlength="2" placeholder="Иван Иванов" /></label>
+        <label>Телефон *<input type="tel" id="b-phone" required minlength="5" placeholder="+7 900 000-00-00" /></label>
+        <label>E-mail *<input type="email" id="b-email" required placeholder="you@mail.ru" /></label>
+        <label>Заезд *<input type="date" id="b-checkin" required /></label>
+        <label>Выезд *<input type="date" id="b-checkout" required /></label>
+        <label>Гости *<input type="number" id="b-guests" min="1" max="20" value="1" required /></label>
+        <label>Комментарий<textarea id="b-comment" rows="3" placeholder="Например: ранний заезд"></textarea></label>
+        <div class="booking-total" id="booking-total"></div>
+        <button type="submit" class="btn btn-primary btn-lg">Забронировать</button>
+        <div id="booking-error" class="error hidden"></div>
+      </form>
+    </section>
+
+    <!-- ===== Страница "Мои брони" ===== -->
+    <section id="page-bookings" class="hidden">
+      <h2>Мои брони</h2>
+      <div class="lookup-bar">
+        <input type="email" id="lookup-email" placeholder="Введите ваш e-mail, чтобы найти брони" />
+        <button class="btn btn-primary" onclick="loadMyBookings()">Найти</button>
+      </div>
+      <p style="color:var(--gray); font-size:13px; margin-bottom:16px">📅 Занятость по датам видна прямо в календаре на странице каждого объекта — выбирайте свободные дни до оформления брони.</p>
+      <div id="bookings-list"></div>
+    </section>
+  </main>
+
+  <!-- ===== Модальное окно успеха ===== -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-icon">✅</div>
+      <h3>Бронь оформлена!</h3>
+      <p id="modal-text"></p>
+      <button class="btn btn-primary" onclick="closeModal(); showPage('bookings', lastBookingEmail);">Посмотреть мои брони</button>
+      <button class="btn btn-ghost" onclick="closeModal()">Закрыть</button>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="container">
+      StayEasy © 2026 — демо-сервис бронирования номеров и квартир.
+      <a href="/docs" target="_blank">API документация</a>
+    </div>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StayEasy — Админка</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="header">
+    <div class="container header-inner">
+      <a href="/" class="logo">🛠 Stay<span>Admin</span></a>
+      <nav class="nav">
+        <a href="/" class="nav-btn">← На сайт</a>
+        <button class="nav-btn hidden" id="btn-logout" onclick="logout()">Выйти (<span id="who"></span>)</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- ===== Экран входа ===== -->
+    <section id="login-view">
+      <div class="admin-login-card">
+        <h2>Вход в админку</h2>
+        <form id="login-form">
+          <label>Логин<input type="text" id="l-user" required autocomplete="username" /></label>
+          <label>Пароль<input type="password" id="l-pass" required autocomplete="current-password" /></label>
+          <button type="submit" class="btn btn-primary" style="width:100%">Войти</button>
+          <div id="login-error" class="error hidden" style="display:none"></div>
+        </form>
+        <p style="color:var(--gray); font-size:13px; margin-top:14px">
+          По умолчанию: admin / admin123 (задаются переменными окружения ADMIN_USERNAME / ADMIN_PASSWORD).
+        </p>
+      </div>
+    </section>
+
+    <!-- ===== Панель ===== -->
+    <section id="panel-view" class="hidden">
+      <h2 style="margin-top:24px">Панель управления</h2>
+      <div class="admin-tabs">
+        <button class="admin-tab active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Дашборд</button>
+        <button class="admin-tab" data-tab="bookings" onclick="switchTab('bookings')">🧾 Брони</button>
+        <button class="admin-tab" data-tab="listings" onclick="switchTab('listings')">🏠 Объекты</button>
+      </div>
+
+      <!-- Дашборд -->
+      <div id="tab-dashboard">
+        <div class="stats-grid" id="stats-grid"><div class="stat-card"><div class="num">…</div><div class="lbl">Загрузка</div></div></div>
+        <h3 style="margin-bottom:12px">Ближайшие заезды</h3>
+        <div class="table-wrap"><table class="admin-table" id="arrivals-table"></table></div>
+      </div>
+
+      <!-- Брони -->
+      <div id="tab-bookings" class="hidden">
+        <div class="filters-bar">
+          <div><label>Поиск (имя/тел./e-mail)</label><input type="text" id="bk-search" placeholder="Иван, +7…, mail@" /></div>
+          <div><label>Статус</label>
+            <select id="bk-status">
+              <option value="">Все</option>
+              <option value="pending">Ожидает</option>
+              <option value="confirmed">Подтверждена</option>
+              <option value="cancelled">Отменена</option>
+            </select>
+          </div>
+          <div><label>Объект</label><select id="bk-listing"><option value="">Все</option></select></div>
+          <div><label>Заезд с</label><input type="date" id="bk-from" /></div>
+          <div><label>Заезд по</label><input type="date" id="bk-to" /></div>
+          <button class="btn btn-primary" onclick="loadBookings()">Применить</button>
+        </div>
+        <div class="table-wrap"><table class="admin-table" id="bookings-table"></table></div>
+      </div>
+
+      <!-- Объекты -->
+      <div id="tab-listings" class="hidden">
+        <div class="table-wrap"><table class="admin-table" id="listings-table"></table></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">StayEasy Admin © 2026 · <a href="/docs" target="_blank">API</a></div>
+  </footer>
+
+  <script src="/static/admin.js"></script>
+</body>
+</html>
