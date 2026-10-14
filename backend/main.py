@@ -6,11 +6,11 @@ import secrets
 from datetime import date, datetime, timedelta
 from typing import Optional, List
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session, joinedload
 
 from .database import engine, get_db, SessionLocal
@@ -25,6 +25,7 @@ from .schemas import (
     ListingCreate,
     ListingOut,
     ListingUpdate,
+    split_images,
 )
 
 # Создаём таблицы при старте
@@ -32,6 +33,17 @@ from . import models  # noqa: F401  (регистрирует модели в Ba
 from .database import Base
 
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_schema_upgrades():
+    """Мягкая миграция SQLite: добавляем отсутствующие колонки без потери данных."""
+    with engine.begin() as conn:
+        cols = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(listings)").fetchall()}
+        if "images" not in cols:
+            conn.execute(text("ALTER TABLE listings ADD COLUMN images TEXT NOT NULL DEFAULT ''"))
+
+
+ensure_schema_upgrades()
 
 app = FastAPI(
     title="StayEasy — бронирование номеров и квартир",
@@ -151,6 +163,35 @@ def serve_index():
 
 # ==================== Listings ====================
 
+def listing_payload_to_fields(payload) -> dict:
+    """Превращает входную схему (ListingCreate/ListingUpdate) в поля ORM.
+
+    Поддерживает несколько картинок: images=[...] или images_raw="url1,url2".
+    Первая картинка — обложка (image_url), остальные хранятся в Listing.images.
+    """
+    data = payload.model_dump(exclude_unset=True)
+    images_raw = data.pop("images_raw", None)
+    images_list = data.pop("images", None)
+
+    if images_raw is not None or images_list:
+        urls = split_images(images_raw) if images_raw else []
+        for u in (images_list or []):
+            u = (u or "").strip()
+            if u and u not in urls:
+                urls.append(u)
+        urls = urls[:12]
+        # если обложку не прислали отдельно — берём первую из списка
+        cover = data.get("image_url")
+        if cover is None and payload.image_url:
+            cover = payload.image_url.strip()
+        if not cover and urls:
+            cover = urls[0]
+        rest = [u for u in urls if u != cover]
+        data["image_url"] = cover or ""
+        data["images"] = ",".join(rest)
+    return data
+
+
 @app.get("/api/listings", response_model=List[ListingOut])
 def list_listings(
     db: Session = Depends(get_db),
@@ -179,37 +220,37 @@ def list_listings(
                 raise HTTPException(400, "Дата выезда должна быть позже даты заезда")
             if not is_listing_available(db, l.id, check_in, check_out):
                 continue
-        results.append(l)
+        results.append(ListingOut.from_orm_any(l))
     return results
 
 
-@app.get("/api/listings/{listing_id}", response_model=ListingOut)
+@app.get("/api/listings/{listing_id}")
 def get_listing(listing_id: int, db: Session = Depends(get_db)):
     l = db.query(Listing).get(listing_id)
     if not l or not l.is_active:
         raise HTTPException(404, "Объект не найден")
-    return l
+    return ListingOut.from_orm_any(l)
 
 
 @app.post("/api/listings", response_model=ListingOut, status_code=201)
 def create_listing(payload: ListingCreate, db: Session = Depends(get_db)):
-    l = Listing(**payload.model_dump())
+    l = Listing(**listing_payload_to_fields(payload))
     db.add(l)
     db.commit()
     db.refresh(l)
-    return l
+    return ListingOut.from_orm_any(l)
 
 
-@app.patch("/api/listings/{listing_id}", response_model=ListingOut)
+@app.patch("/api/listings/{listing_id}")
 def update_listing(listing_id: int, payload: ListingUpdate, db: Session = Depends(get_db)):
     l = db.query(Listing).get(listing_id)
     if not l:
         raise HTTPException(404, "Объект не найден")
-    for k, v in payload.model_dump(exclude_unset=True).items():
+    for k, v in listing_payload_to_fields(payload).items():
         setattr(l, k, v)
     db.commit()
     db.refresh(l)
-    return l
+    return ListingOut.from_orm_any(l)
 
 
 @app.delete("/api/listings/{listing_id}", status_code=204)
@@ -470,20 +511,20 @@ def admin_delete_booking(booking_id: int, request: Request, db: Session = Depend
     db.commit()
 
 
-@app.get("/api/admin/listings", response_model=List[ListingOut])
+@app.get("/api/admin/listings")
 def admin_list_all_listings(request: Request, db: Session = Depends(get_db)):
     """Все объекты, включая неактивные — только для админа."""
     require_admin(request)
-    return db.query(Listing).order_by(Listing.city, Listing.title).all()
+    return [ListingOut.from_orm_any(l) for l in db.query(Listing).order_by(Listing.city, Listing.title).all()]
 
 
-@app.post("/api/admin/listings", response_model=ListingOut, status_code=201)
+@app.post("/api/admin/listings", status_code=201)
 def admin_create_listing(payload: ListingCreate, request: Request, db: Session = Depends(get_db)):
     require_admin(request)
     return create_listing(payload, db=db)
 
 
-@app.patch("/api/admin/listings/{listing_id}", response_model=ListingOut)
+@app.patch("/api/admin/listings/{listing_id}")
 def admin_update_listing(listing_id: int, payload: ListingUpdate, request: Request, db: Session = Depends(get_db)):
     require_admin(request)
     return update_listing(listing_id, payload, db=db)
@@ -493,6 +534,38 @@ def admin_update_listing(listing_id: int, payload: ListingUpdate, request: Reque
 def admin_delete_listing(listing_id: int, request: Request, db: Session = Depends(get_db)):
     require_admin(request)
     return delete_listing(listing_id, db=db)
+
+
+# ==================== Загрузка картинок (для админки) ====================
+
+UPLOAD_DIR = os.path.join(os.path.dirname(FRONTEND_DIR), "uploads")
+ALLOWED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"}
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024  # 8 МБ
+
+
+@app.post("/api/admin/upload-image")
+async def admin_upload_image(request: Request, file: UploadFile = File(...)):
+    """Загрузка фото объекта: сохраняет файл в ./uploads и отдаёт URL /uploads/..."""
+    require_admin(request)
+    import posixpath
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_IMAGE_EXT:
+        raise HTTPException(400, f"Неподдерживаемый формат: {ext or 'без расширения'}")
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(400, "Файл больше 8 МБ")
+    if not data:
+        raise HTTPException(400, "Пустой файл")
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    safe_base = posixpath.basename((file.filename or "image").replace("\\", "/"))
+    stem, _ = os.path.splitext(safe_base)
+    stem = "".join(c for c in stem if c.isalnum() or c in "-_")[:40] or "image"
+    name = f"{datetime.utcnow():%Y%m%d%H%M%S}_{stem}{ext}"
+    with open(os.path.join(UPLOAD_DIR, name), "wb") as f:
+        f.write(data)
+    return {"url": f"/uploads/{name}", "size": len(data)}
 
 
 @app.patch("/api/bookings/{booking_id}/status", response_model=BookingOut)
@@ -536,31 +609,37 @@ def seed_demo_data():
             dict(title="Уютная студия в центре", property_type="apartment", city="Москва",
                  address="ул. Тверская, 12", guests=2, bedrooms=1, price_per_night=4500, rating=4.8,
                  image_url="https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&q=70",
+                 images="https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800&q=70, https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800&q=70",
                  description="Светлая студия с панорамными окнами в 5 минутах от метро. Идеальна для пар и командировок.",
                  amenities="Wi-Fi, Кухня, Стиральная машина, Кондиционер"),
             dict(title="2-комнатная квартира у парка", property_type="apartment", city="Санкт-Петербург",
                  address="Московский пр., 45", guests=4, bedrooms=2, price_per_night=6200, rating=4.7,
                  image_url="https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800&q=70",
+                 images="https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800&q=70, https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&q=70",
                  description="Просторная квартира рядом с парком Победы. Тихий двор, всё необходимое для семьи.",
                  amenities="Wi-Fi, Кухня, Балкон, Парковка"),
             dict(title="Стандартный номер в отеле «Волна»", property_type="room", city="Сочи",
                  address="Черноморская ул., 7", guests=2, bedrooms=1, price_per_night=3800, rating=4.5,
                  image_url="https://images.unsplash.com/photo-1611892440504-42a792e24d32?w=800&q=70",
+                 images="https://images.unsplash.com/photo-1590490360182-c33fe51c6fbd?w=800&q=70, https://images.unsplash.com/photo-1584132967334-10e017469f7f?w=800&q=70",
                  description="Комфортный номер с видом на море, завтрак включён, до пляжа 3 минуты пешком.",
                  amenities="Wi-Fi, Завтрак, Кондиционер, Бассейн"),
             dict(title="Лофт с террасой", property_type="apartment", city="Казань",
                  address="ул. Баумана, 28", guests=3, bedrooms=1, price_per_night=5100, rating=4.9,
                  image_url="https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800&q=70",
+                 images="https://images.unsplash.com/photo-1493809842364-78817addd179?w=800&q=70, https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&q=70",
                  description="Дизайнерский лофт в историческом центре. Большая терраса с видом на Кремль.",
                  amenities="Wi-Fi, Кухня, Терраса, Кофемашина"),
             dict(title="Эконом номер с односпальной кроватью", property_type="room", city="Нижний Новгород",
                  address="ул. Большая Покровская, 3", guests=1, bedrooms=1, price_per_night=1900, rating=4.2,
                  image_url="https://images.unsplash.com/photo-1595576501825-4044aebc4f2b?w=800&q=70",
+                 images="https://images.unsplash.com/photo-1595576501825-4044aebc4f2b?w=800&q=70, https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=800&q=70",
                  description="Бюджетный вариант в самом сердце города. Чисто, тихо, рядом кафе и транспорт.",
                  amenities="Wi-Fi, Душ, ТВ"),
             dict(title="Таунхаус у моря", property_type="apartment", city=" Калининград".strip(),
                  address="Курская коса, 12", guests=6, bedrooms=3, price_per_night=9800, rating=4.9,
                  image_url="https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&q=70",
+                 images="https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=800&q=70, https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?w=800&q=70",
                  description="Двухэтажный домик на берегу Балтики. Камин, гриль, собственный выход к пляжу.",
                  amenities="Wi-Fi, Кухня, Камин, Парковка, Гриль"),
         ]
@@ -572,6 +651,10 @@ def seed_demo_data():
 
 
 seed_demo_data()
+
+# Загруженные через админку фото отдаём из ./uploads
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # Статические ассеты фронтенда (css/js/img) — подключаем в конце,
 # чтобы API-маршруты имели приоритет.

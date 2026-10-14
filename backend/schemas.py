@@ -7,6 +7,19 @@ from pydantic import BaseModel, Field, field_validator
 
 # ---------- Listings ----------
 
+MAX_IMAGES = 12
+
+
+def split_images(raw: str) -> List[str]:
+    """Список URL из строки через запятую/перевод строки (без пустых)."""
+    parts = []
+    for chunk in (raw or "").replace("\n", ",").split(","):
+        p = chunk.strip()
+        if p:
+            parts.append(p)
+    return parts
+
+
 class ListingBase(BaseModel):
     title: str = Field(min_length=3, max_length=200)
     description: str = ""
@@ -16,15 +29,37 @@ class ListingBase(BaseModel):
     guests: int = Field(default=2, ge=1, le=20)
     bedrooms: int = Field(default=1, ge=0, le=20)
     price_per_night: float = Field(default=0, ge=0)
+    rating: float = Field(default=4.5, ge=0, le=5)
     image_url: str = ""
     amenities: str = ""
 
 
-class ListingCreate(ListingBase):
+class ListingIn(ListingBase):
+    """Входные данные: картинки можно прислать списком ИЛИ одной строкой."""
+    images: List[str] = Field(default_factory=list, max_length=MAX_IMAGES)
+    images_raw: Optional[str] = None  # "url1,url2" — удобно из админ-формы
+
+    @field_validator("images")
+    @classmethod
+    def clean_urls(cls, v: List[str]) -> List[str]:
+        out = []
+        for u in v:
+            u = (u or "").strip()
+            if not u:
+                continue
+            if not u.startswith(("http://", "https://", "/")):
+                raise ValueError(f"Некорректный URL картинки: {u[:60]}")
+            if len(u) > 500:
+                raise ValueError("Слишком длинный URL картинки")
+            out.append(u)
+        return out
+
+
+class ListingCreate(ListingIn):
     pass
 
 
-class ListingUpdate(BaseModel):
+class ListingUpdate(ListingIn):
     title: Optional[str] = Field(default=None, min_length=3, max_length=200)
     description: Optional[str] = None
     property_type: Optional[str] = Field(default=None, pattern="^(room|apartment)$")
@@ -33,6 +68,7 @@ class ListingUpdate(BaseModel):
     guests: Optional[int] = Field(default=None, ge=1, le=20)
     bedrooms: Optional[int] = Field(default=None, ge=0, le=20)
     price_per_night: Optional[float] = Field(default=None, ge=0)
+    rating: Optional[float] = Field(default=None, ge=0, le=5)
     image_url: Optional[str] = None
     amenities: Optional[str] = None
     is_active: Optional[bool] = None
@@ -40,9 +76,22 @@ class ListingUpdate(BaseModel):
 
 class ListingOut(ListingBase):
     id: int
-    rating: float
     is_active: bool
     created_at: datetime
+    images: List[str] = []
+
+    @classmethod
+    def from_orm_any(cls, l) -> "ListingOut":
+        """Собирает ответ из ORM-объекта: images = image_url + список images."""
+        extra = split_images(getattr(l, "images", "") or "")
+        all_imgs = ([l.image_url] if l.image_url else []) + [u for u in extra if u != l.image_url]
+        return cls(
+            id=l.id, title=l.title, description=l.description,
+            property_type=l.property_type, city=l.city, address=l.address,
+            guests=l.guests, bedrooms=l.bedrooms, price_per_night=l.price_per_night,
+            rating=l.rating, image_url=l.image_url, amenities=l.amenities,
+            is_active=l.is_active, created_at=l.created_at, images=all_imgs,
+        )
 
     class Config:
         from_attributes = True
