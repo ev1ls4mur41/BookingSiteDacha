@@ -17,10 +17,26 @@ requirements.txt
 
 ## Запуск
 
+### Windows (Git Bash)
+
 ```bash
+python -m venv .venv
+source .venv/Scripts/activate   # если не работает: .venv/Scripts/activate
 pip install -r requirements.txt
-uvicorn backend.main:app --host 0.0.0.0 --port 8000
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ```
+
+### Linux / macOS
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+> Важно: запускайте команды из корня проекта (там, где лежит `requirements.txt`).
+> Если команда `uvicorn` не найдена — используйте `python -m uvicorn ...`, это работает всегда.
 
 Откройте:
 
