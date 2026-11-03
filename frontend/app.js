@@ -317,13 +317,27 @@ function drawCalendarGrid() {
   updateCalSelection();
 }
 
+function localIso(d) {
+  // локальная ISO-дата (без UTC-сдвига, в отличие от toISOString)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function dayStatus(iso) {
+  // статус дня из календаря; если месяц ещё не загружен — считаем по текущему дню
+  const st = calDays[iso];
+  if (st) return st;
+  const todayIso = localIso(new Date());
+  if (iso < todayIso) return "past";
+  return "free";
+}
+
 function rangeBlocked(fromIso, toIso) {
-  // проверка: все ночи [from, to) должны быть free и не past
+  // проверка: все ночи [from, to) должны быть свободны для проживания
   let d = new Date(fromIso + "T00:00:00");
   const end = new Date(toIso + "T00:00:00");
   while (d < end) {
-    const iso = d.toISOString().slice(0, 10);
-    const st = calDays[iso];
+    const iso = localIso(d);
+    const st = dayStatus(iso);
     if (st === "booked" || st === "past") return true;   // "today" — тоже бронируется
     d.setDate(d.getDate() + 1);
   }
@@ -331,15 +345,12 @@ function rangeBlocked(fromIso, toIso) {
 }
 
 function calPick(iso) {
-  if (!selStart || (selStart && selEnd)) {
-    // начало нового выбора
+  if (!selStart || selEnd) {
+    // первый клик — выбираем заезд
     selStart = iso; selEnd = null;
-  } else if (iso <= selStart) {
-    // дата раньше или равна заезду — это не может быть выездом:
-    // начинаем новый выбор с этой даты (раньше здесь сбрасывался выбранный выезд)
-    selStart = iso; selEnd = null;
-  } else {
-    // выезд — можно выбрать даже "занятый" день (это день освобождения),
+  } else if (iso > selStart) {
+    // второй клик позже заезда — это выезд.
+    // Сам день выезда может быть «занят» (это день освобождения),
     // но все ночи между должны быть свободны
     if (rangeBlocked(selStart, iso)) {
       flashCalMsg("Между выбранными датами есть занятые дни ⛔", true);
@@ -347,6 +358,10 @@ function calPick(iso) {
     } else {
       selEnd = iso;
     }
+  } else {
+    // клик на сам заезд или раньше него — сброс/новый выбор
+    if (iso === selStart) { selStart = null; selEnd = null; }
+    else { selStart = iso; selEnd = null; }
   }
   syncCalToForm();
   drawCalendarGrid();
@@ -536,12 +551,28 @@ async function liveAvailabilityCheck() {
     await origOpen(id);
   };
 
-  // ставим минимальную дату заезда = сегодня
-  const today = new Date().toISOString().slice(0, 10);
+  // ставим минимальную дату заезда = сегодня (локальная дата, без UTC-сдвига)
+  const today = localIso(new Date());
   $("f-checkin").min = today;
   $("f-checkout").min = today;
   $("b-checkin").min = today;
   $("b-checkout").min = today;
+
+  // синхронизация min у даты выезда с выбранной датой заезда
+  const syncCheckoutMin = (ciEl, coEl) => {
+    ciEl.addEventListener("change", () => {
+      if (ciEl.value) {
+        const d = new Date(ciEl.value + "T00:00:00");
+        d.setDate(d.getDate() + 1);
+        coEl.min = localIso(d);
+        if (coEl.value && coEl.value <= ciEl.value) coEl.value = "";
+      } else {
+        coEl.min = today;
+      }
+    });
+  };
+  syncCheckoutMin($("f-checkin"), $("f-checkout"));
+  syncCheckoutMin($("b-checkin"), $("b-checkout"));
 
   // первичная загрузка всех объектов
   const res = await fetch(`${API}/listings`);
