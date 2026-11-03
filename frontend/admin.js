@@ -8,6 +8,10 @@ const TYPE_LABEL = { apartment: "Квартира", room: "Номер" };
 const STATUS_LABEL = { pending: "Ожидает", confirmed: "Подтверждена", cancelled: "Отменена" };
 
 let allListings = [];
+let allProperties = [];   // объекты размещения (здания)
+
+const propName = (l) => l.property_name || l.city || "Без объекта";
+const propAddress = (l) => l.property_address || l.address || "";
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>
@@ -47,10 +51,11 @@ function enterPanel(username) {
   $("panel-view").classList.remove("hidden");
   $("btn-logout").classList.remove("hidden");
   $("who").textContent = username;
-  loadAllListings().then(() => {
+  Promise.all([loadAllListings(), loadAllProperties()]).then(() => {
     loadStats();
     loadBookings();
     loadListingsTable();
+    loadPropertiesTable();
   });
 }
 
@@ -80,7 +85,7 @@ async function logout() {
 
 // ---------- Табы ----------
 function switchTab(tab) {
-  ["dashboard", "bookings", "listings"].forEach((t) =>
+  ["dashboard", "bookings", "listings", "properties"].forEach((t) =>
     $("tab-" + t).classList.toggle("hidden", t !== tab)
   );
   document.querySelectorAll(".admin-tab").forEach((b) =>
@@ -214,7 +219,138 @@ function openCalForListing(id) {
   window.open(`/?listing=${id}`, "_blank");
 }
 
-// ---------- Объекты: таблица + редактирование прямо в админке ----------
+// ---------- Объекты размещения (Properties): таблица + CRUD ----------
+async function loadAllProperties() {
+  try {
+    const res = await fetch(`${API}/admin/properties`, { credentials: "same-origin" });
+    if (res.ok) allProperties = await res.json();
+  } catch (_) {}
+}
+
+async function loadPropertiesTable() {
+  try {
+    const res = await fetch(`${API}/admin/properties`, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(await extractError(res));
+    const items = await res.json();
+    allProperties = items;
+    $("properties-table").innerHTML = `
+      <thead><tr><th>ID</th><th>Название</th><th>Адрес</th><th>Номеров активно</th><th>Статус</th><th></th></tr></thead>
+      <tbody>${items.map((p) => `
+        <tr style="${p.is_active ? "" : "opacity:.5"}">
+          <td>${p.id}</td>
+          <td><b>${esc(p.name)}</b>${p.description ? `<br/><span style="color:var(--gray);font-size:12px">${esc(p.description)}</span>` : ""}</td>
+          <td>${esc(p.address)}</td>
+          <td>${p.listings_count}</td>
+          <td>${p.is_active ? '<span class="status status-confirmed" style="font-size:12px;font-weight:800;padding:4px 10px;border-radius:999px;background:#d4edda;color:#155724">Активен</span>' : '<span class="status" style="font-size:12px;font-weight:800;padding:4px 10px;border-radius:999px;background:#eee;color:#666">Скрыт</span>'}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-primary" onclick="openPropertyEditor(${p.id}); event.stopPropagation()" title="Редактировать">✏️</button>
+            <button class="btn btn-ghost" onclick="toggleProperty(${p.id}, ${!p.is_active}); event.stopPropagation()" title="Показать/скрыть">${p.is_active ? "🙈" : "👁"}</button>
+          </td>
+        </tr>`).join("") || `<tr><td colspan="6" style="color:var(--gray)">Объектов пока нет — добавьте первый 👆</td></tr>`}</tbody>`;
+    document.querySelectorAll("#properties-table tbody tr").forEach((tr, i) => {
+      if (!items[i]) return;
+      tr.style.cursor = "pointer";
+      tr.onclick = () => openPropertyEditor(items[i].id);
+    });
+  } catch (err) {
+    $("properties-table").innerHTML = `<tr><td>Ошибка: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+function fillPropertySelect(selectedId) {
+  const sel = $("ed-property");
+  sel.innerHTML = `<option value="">— выберите объект —</option>` +
+    allProperties.map((p) =>
+      `<option value="${p.id}" ${p.id === selectedId ? "selected" : ""}>${esc(p.name)} (${esc(p.address)})</option>`
+    ).join("");
+  updatePropertyAddressHint();
+}
+
+function updatePropertyAddressHint() {
+  const p = allProperties.find((x) => x.id === Number($("ed-property").value));
+  $("ed-property-address").textContent = p ? `📍 ${p.address}` : "";
+}
+
+function openPropertyEditor(id) {
+  const p = id == null ? null : allProperties.find((x) => x.id === id);
+  if (id != null && !p) { alert("Объект не найден, обновите страницу"); return; }
+  $("prop-editor-title").textContent = p ? `Редактировать: ${p.name}` : "Новый объект размещения";
+  $("pd-id").value = p ? p.id : "";
+  $("pd-name").value = p ? p.name : "";
+  $("pd-address").value = p ? p.address : "";
+  $("pd-description").value = p ? p.description : "";
+  $("pd-active").value = p ? (p.is_active ? "1" : "0") : "1";
+  $("pd-delete").classList.toggle("hidden", !p);
+  $("pd-error").classList.add("hidden");
+  $("property-modal").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+}
+
+function closePropertyEditor() {
+  $("property-modal").classList.add("hidden");
+  document.body.style.overflow = "";
+}
+
+$("property-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("pd-error").classList.add("hidden");
+  const id = $("pd-id").value;
+  const payload = {
+    name: $("pd-name").value.trim(),
+    address: $("pd-address").value.trim(),
+    description: $("pd-description").value.trim(),
+    is_active: $("pd-active").value === "1",
+  };
+  try {
+    const res = await fetch(id ? `${API}/admin/properties/${id}` : `${API}/admin/properties`, {
+      method: id ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await extractError(res));
+    closePropertyEditor();
+    await Promise.all([loadAllProperties(), loadAllListings()]);
+    loadPropertiesTable();
+    loadListingsTable();
+  } catch (err) {
+    const box = $("pd-error");
+    box.textContent = "Сохранение не удалось: " + err.message;
+    box.classList.remove("hidden");
+  }
+});
+
+async function deletePropertyFromEditor() {
+  const id = Number($("pd-id").value);
+  if (!id) return;
+  if (!confirm(`Удалить этот объект размещения? Его номера останутся в базе, но повиснут без объекта (их можно будет переназначить).`)) return;
+  const res = await fetch(`${API}/admin/properties/${id}`, { method: "DELETE", credentials: "same-origin" });
+  if (!res.ok) {
+    const box = $("pd-error");
+    box.textContent = "Ошибка удаления: " + (await extractError(res));
+    box.classList.remove("hidden");
+    return;
+  }
+  closePropertyEditor();
+  await Promise.all([loadAllProperties(), loadAllListings()]);
+  loadPropertiesTable();
+  loadListingsTable();
+}
+
+async function toggleProperty(id, is_active) {
+  const p = allProperties.find((x) => x.id === id);
+  if (!p) return;
+  const res = await fetch(`${API}/admin/properties/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ name: p.name, address: p.address, description: p.description, is_active }),
+  });
+  if (!res.ok) alert("Ошибка: " + (await extractError(res)));
+  else { await loadAllProperties(); loadPropertiesTable(); }
+}
+
+// ---------- Номера/квартиры: таблица + редактирование прямо в админке ----------
 let editingImages = [];   // URL картинок редактируемого объекта (первый = обложка)
 
 async function loadListingsTable() {
@@ -223,12 +359,12 @@ async function loadListingsTable() {
     if (!res.ok) throw new Error(await extractError(res));
     const items = await res.json();
     $("listings-table").innerHTML = `
-      <thead><tr><th>ID</th><th>Объект</th><th>Город</th><th>Тип</th><th>Цена/ночь</th><th>Гостей</th><th>Рейтинг</th><th>Фото</th><th>Статус</th><th></th></tr></thead>
+      <thead><tr><th>ID</th><th>Номер/квартира</th><th>Объект размещения</th><th>Тип</th><th>Цена/ночь</th><th>Гостей</th><th>Рейтинг</th><th>Фото</th><th>Статус</th><th></th></tr></thead>
       <tbody>${items.map((l) => `
         <tr style="${l.is_active ? "" : "opacity:.5"}">
           <td>${l.id}</td>
-          <td><b>${esc(l.title)}</b><br/><span style="color:var(--gray);font-size:12px">${esc(l.address)}</span></td>
-          <td>${esc(l.city)}</td>
+          <td><b>${esc(l.title)}</b></td>
+          <td>${esc(propName(l))}<br/><span style="color:var(--gray);font-size:12px">${esc(propAddress(l))}</span></td>
           <td>${TYPE_LABEL[l.property_type]}</td>
           <td>${fmtPrice(l.price_per_night)}</td>
           <td>${l.guests}</td>
@@ -254,12 +390,11 @@ function openListingEditor(id) {
   const l = id == null ? null : allListings.find((x) => x.id === id);
   if (id != null && !l) { alert("Объект не найден, обновите страницу"); return; }
 
-  $("editor-title").textContent = l ? `Редактировать: ${l.title}` : "Новый объект";
+  $("editor-title").textContent = l ? `Редактировать: ${l.title}` : "Новый номер/квартира";
   $("ed-id").value = l ? l.id : "";
   $("ed-title").value = l ? l.title : "";
-  $("ed-city").value = l ? l.city : "";
+  fillPropertySelect(l ? l.property_id : null);
   $("ed-type").value = l ? l.property_type : "apartment";
-  $("ed-address").value = l ? l.address : "";
   $("ed-price").value = l ? l.price_per_night : "";
   $("ed-guests").value = l ? l.guests : 2;
   $("ed-bedrooms").value = l ? l.bedrooms : 1;
@@ -350,9 +485,8 @@ $("listing-form").addEventListener("submit", async (e) => {
   const id = $("ed-id").value;
   const payload = {
     title: $("ed-title").value.trim(),
-    city: $("ed-city").value.trim(),
+    property_id: Number($("ed-property").value) || null,
     property_type: $("ed-type").value,
-    address: $("ed-address").value.trim(),
     price_per_night: Number($("ed-price").value),
     guests: Number($("ed-guests").value),
     bedrooms: Number($("ed-bedrooms").value),
@@ -375,6 +509,7 @@ $("listing-form").addEventListener("submit", async (e) => {
     closeListingEditor();
     await loadAllListings();
     loadListingsTable();
+    loadPropertiesTable();
     loadStats();
   } catch (err) {
     showEdError("Сохранение не удалось: " + err.message);
@@ -384,17 +519,18 @@ $("listing-form").addEventListener("submit", async (e) => {
 async function deleteListingFromEditor() {
   const id = Number($("ed-id").value);
   if (!id) return;
-  if (!confirm(`Удалить объект #${id} со ВСЕМИ его бронями? Это действие необратимо.`)) return;
+  if (!confirm(`Удалить номер/квартиру #${id} со ВСЕМИ его бронями? Это действие необратимо.`)) return;
   const res = await fetch(`${API}/admin/listings/${id}`, { method: "DELETE", credentials: "same-origin" });
   if (!res.ok) { showEdError("Ошибка удаления: " + (await extractError(res))); return; }
   closeListingEditor();
-  await loadAllListings();
+  await Promise.all([loadAllListings(), loadAllProperties()]);
   loadListingsTable();
+  loadPropertiesTable();
   loadStats();
 }
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeListingEditor();
+  if (e.key === "Escape") { closeListingEditor(); closePropertyEditor(); }
 });
 
 async function toggleListing(id, is_active) {

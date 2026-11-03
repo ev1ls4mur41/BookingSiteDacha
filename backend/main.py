@@ -37,16 +37,54 @@ from .database import Base
 Base.metadata.create_all(bind=engine)
 
 
-def migrate_to_properties():
-    """Разовая миграция: создаёт объекты размещения из старых city/address.
+# Наши три объекта размещения (создаются автоматически при первом запуске;
+# дальше ими можно управлять из админки — вкладка «🏘 Объекты»).
+DEFAULT_PROPERTIES = [
+    dict(
+        name="Гостевой дом «ДАЧА»",
+        address="Ростовская область, г. Новочеркасск, ул. Михайловская, д. 103А",
+        description="Уютный гостевой дом в центре Новочеркасска.",
+    ),
+    dict(
+        name="Квартиры-студии «Московская 36»",
+        address="Ростовская область, г. Новочеркасск, ул. Московская, 36",
+        description="Студии для комфортного проживания по адресу ул. Московская, 36.",
+    ),
+    dict(
+        name="Квартиры-студии «Московская 3»",
+        address="Ростовская область, г. Новочеркасск, ул. Московская, 3",
+        description="Студии для комфортного проживания по адресу ул. Московская, 3.",
+    ),
+]
 
-    Уникальные пары (city, address) становятся записями Property, а каждому
-    листингу проставляется property_id. Повторный запуск безопасен (идемпотентен).
+
+def ensure_default_properties():
+    """Создаёт три наших объекта, если их ещё нет (по уникальному имени).
+
+    Идемпотентно: существующие объекты не трогает, удалённые вручную НЕ
+    восстанавливает при каждом старте (иначе нельзя было бы убрать объект).
+    Создаёт только если таблица properties пуста вообще.
     """
     db = SessionLocal()
     try:
         if db.query(Property).count() > 0:
             return
+        for item in DEFAULT_PROPERTIES:
+            db.add(Property(**item))
+        db.commit()
+    finally:
+        db.close()
+
+
+def migrate_to_properties():
+    """Разовая миграция: создаёт объекты размещения из старых city/address.
+
+    Уникальные пары (city, address) становятся записями Property, а каждому
+    листингу проставляется property_id. Повторный запуск безопасен (идемпотентен).
+    Если у листинга уже есть property_id — не трогаем.
+    """
+    db = SessionLocal()
+    try:
         rows = db.query(Listing.city, Listing.address).distinct().all()
         if not rows or all(not (c or "").strip() for c, _ in rows):
             return
@@ -55,12 +93,15 @@ def migrate_to_properties():
             addr = (addr or "").strip()
             if not city_name:
                 continue
-            p = Property(name=city_name, address=addr)
-            db.add(p)
-            db.flush()
+            p = db.query(Property).filter(Property.name == city_name).first()
+            if not p:
+                p = Property(name=city_name, address=addr)
+                db.add(p)
+                db.flush()
             db.query(Listing).filter(
                 func.coalesce(Listing.city, "") == city_name,
                 func.coalesce(Listing.address, "") == addr,
+                Listing.property_id.is_(None),
             ).update({Listing.property_id: p.id}, synchronize_session=False)
         db.commit()
     finally:
@@ -79,6 +120,7 @@ def ensure_schema_upgrades():
 
 ensure_schema_upgrades()
 migrate_to_properties()
+ensure_default_properties()
 
 app = FastAPI(
     title="StayEasy — бронирование номеров и квартир",
@@ -611,6 +653,71 @@ def admin_update_listing(listing_id: int, payload: ListingUpdate, request: Reque
 def admin_delete_listing(listing_id: int, request: Request, db: Session = Depends(get_db)):
     require_admin(request)
     return delete_listing(listing_id, db=db)
+
+
+# ==================== Админка: объекты размещения (Properties) ====================
+
+@app.get("/api/admin/properties", response_model=List[PropertyOut])
+def admin_list_properties(request: Request, db: Session = Depends(get_db)):
+    """Все объекты (включая скрытые) + количество номеров — только для админа."""
+    require_admin(request)
+    props = db.query(Property).order_by(Property.name).all()
+    counts = dict(
+        db.query(Listing.property_id, func.count(Listing.id)).group_by(Listing.property_id).all()
+    )
+    out = []
+    for p in props:
+        item = PropertyOut.from_orm(p)
+        item.listings_count = counts.get(p.id, 0)
+        out.append(item)
+    return out
+
+
+@app.post("/api/admin/properties", response_model=PropertyOut, status_code=201)
+def admin_create_property(payload: PropertyIn, request: Request, db: Session = Depends(get_db)):
+    require_admin(request)
+    name = payload.name.strip()
+    if db.query(Property).filter(Property.name == name).first():
+        raise HTTPException(400, f"Объект с названием «{name}» уже существует")
+    p = Property(name=name, address=payload.address.strip(),
+                 description=payload.description.strip(), is_active=payload.is_active)
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    return p
+
+
+@app.patch("/api/admin/properties/{property_id}", response_model=PropertyOut)
+def admin_update_property(property_id: int, payload: PropertyIn, request: Request, db: Session = Depends(get_db)):
+    require_admin(request)
+    p = db.query(Property).get(property_id)
+    if not p:
+        raise HTTPException(404, "Объект не найден")
+    name = payload.name.strip()
+    dup = db.query(Property).filter(Property.name == name, Property.id != property_id).first()
+    if dup:
+        raise HTTPException(400, f"Объект с названием «{name}» уже существует")
+    p.name = name
+    p.address = payload.address.strip()
+    p.description = payload.description.strip()
+    p.is_active = payload.is_active
+    db.commit()
+    db.refresh(p)
+    return p
+
+
+@app.delete("/api/admin/properties/{property_id}", status_code=204)
+def admin_delete_property(property_id: int, request: Request, db: Session = Depends(get_db)):
+    """Удаляет объект; его номера остаются в БД, но отвязываются (property_id=NULL)."""
+    require_admin(request)
+    p = db.query(Property).get(property_id)
+    if not p:
+        raise HTTPException(404, "Объект не найден")
+    db.query(Listing).filter(Listing.property_id == property_id).update(
+        {Listing.property_id: None}, synchronize_session=False
+    )
+    db.delete(p)
+    db.commit()
 
 
 # ==================== Загрузка картинок (для админки) ====================

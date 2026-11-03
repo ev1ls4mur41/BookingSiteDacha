@@ -40,7 +40,8 @@
       <div class="admin-tabs">
         <button class="admin-tab active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Дашборд</button>
         <button class="admin-tab" data-tab="bookings" onclick="switchTab('bookings')">🧾 Брони</button>
-        <button class="admin-tab" data-tab="listings" onclick="switchTab('listings')">🏠 Объекты</button>
+        <button class="admin-tab" data-tab="listings" onclick="switchTab('listings')">🛏 Номера/квартиры</button>
+        <button class="admin-tab" data-tab="properties" onclick="switchTab('properties')">🏘 Объекты</button>
       </div>
 
       <!-- Дашборд -->
@@ -70,16 +71,52 @@
         <div class="table-wrap"><table class="admin-table" id="bookings-table"></table></div>
       </div>
 
-      <!-- Объекты -->
+      <!-- Номера/квартиры -->
       <div id="tab-listings" class="hidden">
         <div style="margin: 6px 0 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px">
-          <span style="color:var(--gray); font-size:14px">✏️ Клик по строке — редактирование объекта прямо здесь. 🖼 Можно несколько фото: загрузка с диска или URL.</span>
-          <button class="btn btn-primary" onclick="openListingEditor(null)">＋ Новый объект</button>
+          <span style="color:var(--gray); font-size:14px">✏️ Клик по строке — редактирование номера. 🖼 Можно несколько фото: загрузка с диска или URL.</span>
+          <button class="btn btn-primary" onclick="openListingEditor(null)">＋ Новый номер/квартиру</button>
         </div>
         <div class="table-wrap"><table class="admin-table" id="listings-table"></table></div>
       </div>
+
+      <!-- Объекты размещения (здания) -->
+      <div id="tab-properties" class="hidden">
+        <div style="margin: 6px 0 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px">
+          <span style="color:var(--gray); font-size:14px">🏘 Здания/базы с одним адресом. Внутри каждого — свои номера и квартиры (вкладка «Номера»).</span>
+          <button class="btn btn-primary" onclick="openPropertyEditor(null)">＋ Добавить объект</button>
+        </div>
+        <div class="table-wrap"><table class="admin-table" id="properties-table"></table></div>
+      </div>
     </section>
   </main>
+
+  <!-- ===== Редактор объекта размещения (модалка) ===== -->
+  <div id="property-modal" class="modal hidden">
+    <div class="modal-box editor-box">
+      <div class="editor-head">
+        <h3 id="prop-editor-title">Новый объект</h3>
+        <button class="lb-close" onclick="closePropertyEditor()">✕</button>
+      </div>
+      <form id="property-form" class="listing-editor">
+        <input type="hidden" id="pd-id" />
+        <div class="ed-grid">
+          <label class="ed-full">Название *<input type="text" id="pd-name" required minlength="2" placeholder="Гостевой дом «ДАЧА»" /></label>
+          <label class="ed-full">Адрес *<input type="text" id="pd-address" required minlength="3" placeholder="Ростовская область, г. Новочеркасск, ул. …" /></label>
+          <label class="ed-full">Описание<textarea id="pd-description" rows="3"></textarea></label>
+          <label class="ed-full">Показывать на сайте
+            <select id="pd-active"><option value="1">Да — активен</option><option value="0">Нет — скрыт</option></select>
+          </label>
+        </div>
+        <div id="pd-error" class="error hidden"></div>
+        <div class="editor-actions">
+          <button type="submit" class="btn btn-primary btn-lg" id="pd-save">💾 Сохранить</button>
+          <button type="button" class="btn btn-danger hidden" id="pd-delete" onclick="deletePropertyFromEditor()">🗑 Удалить объект</button>
+          <button type="button" class="btn btn-ghost" onclick="closePropertyEditor()">Отмена</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- ===== Редактор объекта (модалка) ===== -->
   <div id="listing-modal" class="modal hidden">
@@ -92,11 +129,13 @@
         <input type="hidden" id="ed-id" />
         <div class="ed-grid">
           <label class="ed-full">Название *<input type="text" id="ed-title" required minlength="3" /></label>
-          <label>Город *<input type="text" id="ed-city" required minlength="2" /></label>
+          <label class="ed-full">Объект размещения *
+            <select id="ed-property"></select>
+          </label>
           <label>Тип
             <select id="ed-type"><option value="room">Номер</option><option value="apartment">Квартира</option></select>
           </label>
-          <label class="ed-full">Адрес<input type="text" id="ed-address" /></label>
+          <label class="ed-full ed-hint" id="ed-property-address" style="color:var(--gray);font-size:13px"></label>
           <label>Цена за ночь, ₽ *<input type="number" id="ed-price" min="0" step="50" required /></label>
           <label>Вместимость (гостей)<input type="number" id="ed-guests" min="1" max="20" required /></label>
           <label>Спален / комнат<input type="number" id="ed-bedrooms" min="0" max="20" /></label>
