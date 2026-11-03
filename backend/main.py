@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Uploa
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
-from sqlalchemy import or_, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload
 
 from .database import engine, get_db, SessionLocal
@@ -196,6 +196,7 @@ def listing_payload_to_fields(payload) -> dict:
 def list_listings(
     db: Session = Depends(get_db),
     city: Optional[str] = Query(None, description="Город"),
+    listing_id: Optional[int] = Query(None, ge=1, description="Конкретный объект (id)"),
     type: Optional[str] = Query(None, pattern="^(room|apartment)$", description="Тип: room|apartment"),
     guests: Optional[int] = Query(None, ge=1, le=20, description="Минимум гостей"),
     max_price: Optional[float] = Query(None, ge=0, description="Макс. цена за ночь"),
@@ -206,6 +207,8 @@ def list_listings(
     q = db.query(Listing).filter(Listing.is_active == True)  # noqa: E712
     if city:
         q = q.filter(Listing.city.ilike(f"%{city.strip()}%"))
+    if listing_id:
+        q = q.filter(Listing.id == listing_id)
     if type:
         q = q.filter(Listing.property_type == type)
     if guests:
@@ -222,6 +225,21 @@ def list_listings(
                 continue
         results.append(ListingOut.from_orm_any(l))
     return results
+
+
+@app.get("/api/listings/meta")
+def listings_meta(db: Session = Depends(get_db)):
+    """Краткий список активных объектов для фильтра «Объект» на главной."""
+    rows = (
+        db.query(Listing.id, Listing.title, Listing.address, Listing.property_type)
+        .filter(Listing.is_active == True)  # noqa: E712
+        .order_by(Listing.title)
+        .all()
+    )
+    return [
+        {"id": r[0], "title": r[1], "address": r[2], "property_type": r[3]}
+        for r in rows
+    ]
 
 
 @app.get("/api/listings/{listing_id}")
@@ -326,6 +344,10 @@ def listing_calendar(
         booked = any(b.check_in <= d < b.check_out for b in bookings)
         if d < today:
             status_day = "past"
+        elif d == today:
+            # сегодня ещё можно заселиться, но помечаем отдельно —
+            # фронтенд разрешает выбрать эту дату как заезд
+            status_day = "booked" if booked else "today"
         elif booked:
             status_day = "booked"
         else:
