@@ -5,6 +5,25 @@ from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator
 
 
+class PropertyBase(BaseModel):
+    name: str = Field(min_length=2, max_length=200)
+    address: str = ""
+    description: str = ""
+
+
+class PropertyIn(PropertyBase):
+    is_active: bool = True
+
+
+class PropertyOut(PropertyBase):
+    id: int
+    is_active: bool
+    listings_count: int = 0
+
+    class Config:
+        from_attributes = True
+
+
 # ---------- Listings ----------
 
 MAX_IMAGES = 12
@@ -24,8 +43,7 @@ class ListingBase(BaseModel):
     title: str = Field(min_length=3, max_length=200)
     description: str = ""
     property_type: str = Field(default="room", pattern="^(room|apartment)$")
-    city: str = Field(default="", max_length=100)
-    address: str = ""
+    property_id: Optional[int] = None
     guests: int = Field(default=2, ge=1, le=20)
     bedrooms: int = Field(default=1, ge=0, le=20)
     price_per_night: float = Field(default=0, ge=0)
@@ -63,8 +81,7 @@ class ListingUpdate(ListingIn):
     title: Optional[str] = Field(default=None, min_length=3, max_length=200)
     description: Optional[str] = None
     property_type: Optional[str] = Field(default=None, pattern="^(room|apartment)$")
-    city: Optional[str] = Field(default=None, max_length=100)
-    address: Optional[str] = None
+    property_id: Optional[int] = None
     guests: Optional[int] = Field(default=None, ge=1, le=20)
     bedrooms: Optional[int] = Field(default=None, ge=0, le=20)
     price_per_night: Optional[float] = Field(default=None, ge=0)
@@ -79,18 +96,23 @@ class ListingOut(ListingBase):
     is_active: bool
     created_at: datetime
     images: List[str] = []
+    property_name: str = ""
+    property_address: str = ""
 
     @classmethod
     def from_orm_any(cls, l) -> "ListingOut":
         """Собирает ответ из ORM-объекта: images = image_url + список images."""
         extra = split_images(getattr(l, "images", "") or "")
         all_imgs = ([l.image_url] if l.image_url else []) + [u for u in extra if u != l.image_url]
+        prop = getattr(l, "property", None)
         return cls(
             id=l.id, title=l.title, description=l.description,
-            property_type=l.property_type, city=l.city, address=l.address,
+            property_type=l.property_type, property_id=l.property_id,
             guests=l.guests, bedrooms=l.bedrooms, price_per_night=l.price_per_night,
             rating=l.rating, image_url=l.image_url, amenities=l.amenities,
             is_active=l.is_active, created_at=l.created_at, images=all_imgs,
+            property_name=(prop.name if prop else (l.city or "")),
+            property_address=(prop.address if prop else (l.address or "")),
         )
 
     class Config:
