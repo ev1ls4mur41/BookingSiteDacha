@@ -27,6 +27,7 @@ from .schemas import (
     ListingUpdate,
     PropertyIn,
     PropertyOut,
+    PropertyPatch,
     split_images,
 )
 
@@ -59,51 +60,83 @@ DEFAULT_PROPERTIES = [
 
 
 def ensure_default_properties():
-    """Создаёт три наших объекта, если их ещё нет (по уникальному имени).
+    """Однократно (при первой инициализации пустой базы) создаёт три наших
+    объекта размещения.
 
-    Идемпотентно: существующие объекты не трогает, удалённые вручную НЕ
-    восстанавливает при каждом старте (иначе нельзя было бы убрать объект).
-    Создаёт только если таблица properties пуста вообще.
+    Больше НЕ восстанавливает удалённые объекты на каждом старте: если вы
+    удалили объект из админки — он остаётся удалённым. Новые объекты
+    создаются только через админку (вкладка «🏘 Объекты» → «+ Добавить»).
     """
     db = SessionLocal()
     try:
-        if db.query(Property).count() > 0:
-            return
-        for item in DEFAULT_PROPERTIES:
-            db.add(Property(**item))
-        db.commit()
+        has_any = db.query(Property.id).first() is not None
+        if not has_any:
+            for item in DEFAULT_PROPERTIES:
+                db.add(Property(**item))
+            db.commit()
     finally:
         db.close()
 
 
-def migrate_to_properties():
-    """Разовая миграция: создаёт объекты размещения из старых city/address.
+def normalize_property_names():
+    """Нормализует имена объектов: схлопывает дубликаты, отличающиеся только
+    пробелами/регистром/кавычками (например «Квартиры-Студии  ул. Московская
+    36» и «Квартиры-студии «Московская 36»»), перепривязывая к каноническому
+    объекту все его номера. Аккуратно: объединяет ТОЛЬКО полные текстовые
+    дубликаты (после приведения пробельных символов к одному), разные по
+    смыслу объекты пользователя не трогает."""
+    import unicodedata
+    import re as _re
 
-    Уникальные пары (city, address) становятся записями Property, а каждому
-    листингу проставляется property_id. Повторный запуск безопасен (идемпотентен).
-    Если у листинга уже есть property_id — не трогаем.
-    """
+    def canon(s: str) -> str:
+        s = unicodedata.normalize("NFKC", s or "")
+        s = s.replace("\u00a0", " ").replace("\u201c", '"').replace("\u201d", '"')
+        s = _re.sub(r"\s+", " ", s).strip().lower()
+        return s
+
     db = SessionLocal()
     try:
-        rows = db.query(Listing.city, Listing.address).distinct().all()
-        if not rows or all(not (c or "").strip() for c, _ in rows):
-            return
-        for city_name, addr in rows:
-            city_name = (city_name or "").strip()
-            addr = (addr or "").strip()
-            if not city_name:
+        props = db.query(Property).all()
+        groups: dict[str, list[Property]] = {}
+        for p in props:
+            groups.setdefault(canon(p.name), []).append(p)
+        merged = False
+        for key, grp in groups.items():
+            if len(grp) < 2:
                 continue
-            p = db.query(Property).filter(Property.name == city_name).first()
-            if not p:
-                p = Property(name=city_name, address=addr)
-                db.add(p)
-                db.flush()
-            db.query(Listing).filter(
-                func.coalesce(Listing.city, "") == city_name,
-                func.coalesce(Listing.address, "") == addr,
-                Listing.property_id.is_(None),
-            ).update({Listing.property_id: p.id}, synchronize_session=False)
-        db.commit()
+            # выбираем «канонический»: тот, чьё имя точно совпадает с одним из
+            # DEFAULT_PROPERTIES (если есть), иначе — с минимальным id
+            default_names = {d["name"] for d in DEFAULT_PROPERTIES}
+            canonical = next((p for p in grp if p.name in default_names), None) \
+                or min(grp, key=lambda x: x.id)
+            for dup in grp:
+                if dup.id == canonical.id:
+                    continue
+                db.query(Listing).filter(Listing.property_id == dup.id).update(
+                    {Listing.property_id: canonical.id}, synchronize_session=False)
+                db.delete(dup)
+                merged = True
+        if merged:
+            db.commit()
+    finally:
+        db.close()
+
+
+def backfill_listing_property_ids():
+    """Однократно привязывает номера к объектам по property_id, если после
+    миграции остались висячие ссылки или пустые property_id там, где объект
+    очевиден из старого поля city. Ничего не создаёт и не удаляет."""
+    db = SessionLocal()
+    try:
+        names = {p.id: p for p in db.query(Property).all()}
+        fixed = False
+        for l in db.query(Listing).all():
+            if l.property_id and l.property_id not in names:
+                # ссылка на удалённый объект — отвязываем, чтобы UI не падал
+                l.property_id = None
+                fixed = True
+        if fixed:
+            db.commit()
     finally:
         db.close()
 
@@ -119,8 +152,9 @@ def ensure_schema_upgrades():
 
 
 ensure_schema_upgrades()
-migrate_to_properties()
 ensure_default_properties()
+normalize_property_names()
+backfill_listing_property_ids()
 
 app = FastAPI(
     title="StayEasy — бронирование номеров и квартир",
@@ -302,7 +336,9 @@ def list_listings(
     q = (
         db.query(Listing)
         .options(joinedload(Listing.property))
+        .outerjoin(Property, Listing.property_id == Property.id)
         .filter(Listing.is_active == True)  # noqa: E712
+        .filter(or_(Property.id.is_(None), Property.is_active == True))  # noqa: E712
     )
     if property_id:
         q = q.filter(Listing.property_id == property_id)
@@ -328,7 +364,12 @@ def list_listings(
 
 @app.get("/api/listings/{listing_id}")
 def get_listing(listing_id: int, db: Session = Depends(get_db)):
-    l = db.query(Listing).options(joinedload(Listing.property)).get(listing_id)
+    l = (db.query(Listing)
+         .options(joinedload(Listing.property))
+         .outerjoin(Property, Listing.property_id == Property.id)
+         .filter(Listing.id == listing_id)
+         .filter(or_(Property.id.is_(None), Property.is_active == True))  # noqa: E712
+         .first())
     if not l or not l.is_active:
         raise HTTPException(404, "Объект не найден")
     return ListingOut.from_orm_any(l)
@@ -688,19 +729,22 @@ def admin_create_property(payload: PropertyIn, request: Request, db: Session = D
 
 
 @app.patch("/api/admin/properties/{property_id}", response_model=PropertyOut)
-def admin_update_property(property_id: int, payload: PropertyIn, request: Request, db: Session = Depends(get_db)):
+def admin_update_property(property_id: int, payload: PropertyPatch, request: Request, db: Session = Depends(get_db)):
     require_admin(request)
     p = db.query(Property).get(property_id)
     if not p:
         raise HTTPException(404, "Объект не найден")
-    name = payload.name.strip()
-    dup = db.query(Property).filter(Property.name == name, Property.id != property_id).first()
-    if dup:
-        raise HTTPException(400, f"Объект с названием «{name}» уже существует")
-    p.name = name
-    p.address = payload.address.strip()
-    p.description = payload.description.strip()
-    p.is_active = payload.is_active
+    data = payload.model_dump(exclude_unset=True)
+    if "name" in data:
+        name = (data["name"] or "").strip()
+        if not name:
+            raise HTTPException(400, "Название объекта не может быть пустым")
+        dup = db.query(Property).filter(Property.name == name, Property.id != property_id).first()
+        if dup:
+            raise HTTPException(400, f"Объект с названием «{name}» уже существует")
+        data["name"] = name
+    for k, v in data.items():
+        setattr(p, k, v.strip() if isinstance(v, str) else v)
     db.commit()
     db.refresh(p)
     return p

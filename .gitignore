@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+server.log
+bookings.db
+/uploads/
+*.bundle

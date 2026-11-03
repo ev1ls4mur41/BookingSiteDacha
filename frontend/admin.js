@@ -272,13 +272,25 @@ function updatePropertyAddressHint() {
 }
 
 function openPropertyEditor(id) {
-  const p = id == null ? null : allProperties.find((x) => x.id === id);
-  if (id != null && !p) { alert("Объект не найден, обновите страницу"); return; }
+  let p = id == null ? null : allProperties.find((x) => x.id === id);
+  if (id != null && !p) {
+    // кэш allProperties мог устареть — дотягиваем со страницы «Объекты» один раз
+    loadPropertiesTable().then(() => {
+      p = allProperties.find((x) => x.id === id);
+      if (p) fillPropertyModal(p);
+      else alert("Объект не найден (возможно, удалён). Обновите страницу.");
+    });
+    return;
+  }
+  fillPropertyModal(p);
+}
+
+function fillPropertyModal(p) {
   $("prop-editor-title").textContent = p ? `Редактировать: ${p.name}` : "Новый объект размещения";
   $("pd-id").value = p ? p.id : "";
   $("pd-name").value = p ? p.name : "";
   $("pd-address").value = p ? p.address : "";
-  $("pd-description").value = p ? p.description : "";
+  $("pd-description").value = p ? (p.description || "") : "";
   $("pd-active").value = p ? (p.is_active ? "1" : "0") : "1";
   $("pd-delete").classList.toggle("hidden", !p);
   $("pd-error").classList.add("hidden");
@@ -338,13 +350,11 @@ async function deletePropertyFromEditor() {
 }
 
 async function toggleProperty(id, is_active) {
-  const p = allProperties.find((x) => x.id === id);
-  if (!p) return;
   const res = await fetch(`${API}/admin/properties/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     credentials: "same-origin",
-    body: JSON.stringify({ name: p.name, address: p.address, description: p.description, is_active }),
+    body: JSON.stringify({ is_active }),
   });
   if (!res.ok) alert("Ошибка: " + (await extractError(res)));
   else { await loadAllProperties(); loadPropertiesTable(); }

@@ -31,6 +31,21 @@ class PropertyOut(PropertyBase):
         from_attributes = True
 
 
+class PropertyPatch(BaseModel):
+    """Частичное обновление объекта (для кнопки «показать/скрыть» и правок)."""
+    name: Optional[str] = None
+    address: Optional[str] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+
+    @field_validator("name")
+    @classmethod
+    def not_blank(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not v.strip():
+            raise ValueError("Название объекта не может быть пустым")
+        return v
+
+
 # ---------- Listings ----------
 
 MAX_IMAGES = 12

@@ -12,7 +12,12 @@ const TYPE_LABEL = { apartment: "Квартира", room: "Номер" };
 const STATUS_LABEL = { pending: "Ожидает", confirmed: "Подтверждена", cancelled: "Отменена" };
 
 // город показываем только если он задан (у нас все объекты в одном городе)
-const locText = (l) => [l.city, l.address].filter(Boolean).join(", ");
+const locText = (l) => {
+  // Новый формат: объект живёт в Property; старый: city/address прямо у листинга.
+  if (l.property_name || l.property_address)
+    return [l.property_name, l.property_address].filter(Boolean).join(", ");
+  return [l.city, l.address].filter(Boolean).join(", ");
+};
 
 // ---------- Навигация ----------
 function showPage(page, emailForBookings) {
@@ -29,10 +34,60 @@ function showPage(page, emailForBookings) {
   }
 }
 
+// ---------- Фильтры: объект → номер/квартира ----------
+let allListingsForFilter = [];
+
+async function populateFilters() {
+  // Селектор «Объект» тянем из /api/properties, список номеров — из /api/listings.
+  // Если properties пуст (старый код на сервере) — фильтруем карточки по property_name.
+  let props = [];
+  try {
+    const res = await fetch(`${API}/properties`);
+    if (res.ok) props = await res.json();
+  } catch (_) {}
+
+  try {
+    const res = await fetch(`${API}/listings`);
+    allListingsForFilter = res.ok ? await res.json() : [];
+  } catch (_) {
+    allListingsForFilter = [];
+  }
+
+  // показываем в фильтре только объекты, у которых есть видимые номера
+  const withRooms = new Set(allListingsForFilter.map((l) => l.property_id).filter(Boolean));
+  props = props.filter((p) => (p.listings_count || 0) > 0 || withRooms.has(p.id));
+
+  const propSel = $("f-property");
+  const listSel = $("f-listing");
+  if (!propSel || !listSel) return;
+
+  propSel.innerHTML = '<option value="">Все объекты</option>' +
+    props.map((p) =>
+      `<option value="${p.id}">${esc(p.name)}${p.address ? " — " + esc(p.address) : ""}</option>`
+    ).join("");
+
+  const fillListings = () => {
+    const pid = Number(propSel.value) || 0;
+    let items = pid
+      ? allListingsForFilter.filter((l) => l.property_id === pid)
+      : allListingsForFilter;
+    // fallback для старых серверов без property_id: матчим по названию объекта
+    if (pid && props.length && !items.length) {
+      const name = props.find((p) => p.id === pid)?.name || "";
+      items = allListingsForFilter.filter((l) => l.property_name === name);
+    }
+    listSel.innerHTML = '<option value="">Все номера/квартиры</option>' +
+      items.map((l) => `<option value="${l.id}">${esc(l.title)}</option>`).join("");
+  };
+  propSel.addEventListener("change", fillListings);
+  fillListings();
+}
+
 // ---------- Поиск ----------
 $("search-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const params = new URLSearchParams();
+  const pid = $("f-property").value;
   const lid = $("f-listing").value;
   const type = $("f-type").value;
   const ci = $("f-checkin").value;
@@ -40,6 +95,7 @@ $("search-form").addEventListener("submit", async (e) => {
   const guests = $("f-guests").value;
   const maxp = $("f-maxprice").value;
 
+  if (pid) params.set("property_id", pid);
   if (lid) params.set("listing_id", lid);
   if (type) params.set("type", type);
   if (ci) params.set("check_in", ci);
@@ -577,6 +633,7 @@ async function liveAvailabilityCheck() {
   // первичная загрузка всех объектов
   const res = await fetch(`${API}/listings`);
   if (res.ok) renderListings(await res.json());
+  populateFilters();
 
   // прямая ссылка /?listing=ID — открыть карточку объекта (для админки)
   const params = new URLSearchParams(location.search);
