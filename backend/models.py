@@ -2,22 +2,44 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, Integer, String, Float, Boolean, DateTime, Date, ForeignKey, Text,
+    Column, Integer, String, Float, Boolean, DateTime, Date, ForeignKey, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
 from .database import Base
 
 
+class Property(Base):
+    """Объект размещения — здание/база с одним адресом (у нас их три).
+
+    Номера и квартиры (Listing) теперь привязываются к объекту, а не хранят
+    город/адрес у себя. Это позволяет в админке выбирать объект при создании
+    номера, а на сайте фильтровать сразу по объекту.
+    """
+    __tablename__ = "properties"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False, unique=True)
+    address = Column(String(300), nullable=False, default="")
+    description = Column(Text, nullable=False, default="")
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    listings = relationship("Listing", back_populates="property")
+
+
 class Listing(Base):
-    """Номер или квартира, доступная для бронирования."""
+    """Номер или квартира внутри объекта размещения."""
     __tablename__ = "listings"
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=False, default="")
     property_type = Column(String(20), nullable=False, default="room")  # room | apartment
-    city = Column(String(100), nullable=False, index=True)
+    property_id = Column(Integer, ForeignKey("properties.id"), nullable=True, index=True)
+    # устаревшие поля: до миграции данные перенесены в Property; оставлены,
+    # чтобы старая БД не ломалась при чтении
+    city = Column(String(100), nullable=False, default="", index=True)
     address = Column(String(300), nullable=False, default="")
     guests = Column(Integer, nullable=False, default=2)          # вместимость
     bedrooms = Column(Integer, nullable=False, default=1)
@@ -30,6 +52,7 @@ class Listing(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     bookings = relationship("Booking", back_populates="listing", cascade="all, delete-orphan")
+    property = relationship("Property", back_populates="listings")
 
 
 class Booking(Base):

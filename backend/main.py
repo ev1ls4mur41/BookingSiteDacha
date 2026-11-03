@@ -14,7 +14,7 @@ from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, joinedload
 
 from .database import engine, get_db, SessionLocal
-from .models import Booking, Listing
+from .models import Booking, Listing, Property
 from .schemas import (
     AdminLogin,
     AvailabilityRange,
@@ -25,6 +25,8 @@ from .schemas import (
     ListingCreate,
     ListingOut,
     ListingUpdate,
+    PropertyIn,
+    PropertyOut,
     split_images,
 )
 
@@ -35,15 +37,48 @@ from .database import Base
 Base.metadata.create_all(bind=engine)
 
 
+def migrate_to_properties():
+    """Разовая миграция: создаёт объекты размещения из старых city/address.
+
+    Уникальные пары (city, address) становятся записями Property, а каждому
+    листингу проставляется property_id. Повторный запуск безопасен (идемпотентен).
+    """
+    db = SessionLocal()
+    try:
+        if db.query(Property).count() > 0:
+            return
+        rows = db.query(Listing.city, Listing.address).distinct().all()
+        if not rows or all(not (c or "").strip() for c, _ in rows):
+            return
+        for city_name, addr in rows:
+            city_name = (city_name or "").strip()
+            addr = (addr or "").strip()
+            if not city_name:
+                continue
+            p = Property(name=city_name, address=addr)
+            db.add(p)
+            db.flush()
+            db.query(Listing).filter(
+                func.coalesce(Listing.city, "") == city_name,
+                func.coalesce(Listing.address, "") == addr,
+            ).update({Listing.property_id: p.id}, synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+
 def ensure_schema_upgrades():
     """Мягкая миграция SQLite: добавляем отсутствующие колонки без потери данных."""
     with engine.begin() as conn:
         cols = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(listings)").fetchall()}
         if "images" not in cols:
             conn.execute(text("ALTER TABLE listings ADD COLUMN images TEXT NOT NULL DEFAULT ''"))
+        if "property_id" not in cols:
+            conn.execute(text("ALTER TABLE listings ADD COLUMN property_id INTEGER REFERENCES properties(id)"))
 
 
 ensure_schema_upgrades()
+migrate_to_properties()
 
 app = FastAPI(
     title="StayEasy — бронирование номеров и квартир",
@@ -192,21 +227,43 @@ def listing_payload_to_fields(payload) -> dict:
     return data
 
 
+@app.get("/api/properties", response_model=List[PropertyOut])
+def list_properties(db: Session = Depends(get_db)):
+    """Список объектов размещения (зданий/баз) — для фильтра на главной."""
+    props = db.query(Property).filter(Property.is_active == True).order_by(Property.name).all()  # noqa: E712
+    counts = dict(
+        db.query(Listing.property_id, func.count(Listing.id))
+        .filter(Listing.is_active == True)  # noqa: E712
+        .group_by(Listing.property_id)
+        .all()
+    )
+    out = []
+    for p in props:
+        item = PropertyOut.from_orm(p)
+        item.listings_count = counts.get(p.id, 0)
+        out.append(item)
+    return out
+
+
 @app.get("/api/listings", response_model=List[ListingOut])
 def list_listings(
     db: Session = Depends(get_db),
-    city: Optional[str] = Query(None, description="Город"),
-    listing_id: Optional[int] = Query(None, ge=1, description="Конкретный объект (id)"),
+    property_id: Optional[int] = Query(None, ge=1, description="Объект размещения (фильтр по зданию/базе)"),
+    listing_id: Optional[int] = Query(None, ge=1, description="Конкретный номер/квартира (id)"),
     type: Optional[str] = Query(None, pattern="^(room|apartment)$", description="Тип: room|apartment"),
     guests: Optional[int] = Query(None, ge=1, le=20, description="Минимум гостей"),
     max_price: Optional[float] = Query(None, ge=0, description="Макс. цена за ночь"),
     check_in: Optional[date] = None,
     check_out: Optional[date] = None,
 ):
-    """Поиск объектов размещения с фильтрами и проверкой свободных дат."""
-    q = db.query(Listing).filter(Listing.is_active == True)  # noqa: E712
-    if city:
-        q = q.filter(Listing.city.ilike(f"%{city.strip()}%"))
+    """Поиск номеров/квартир с фильтрами и проверкой свободных дат."""
+    q = (
+        db.query(Listing)
+        .options(joinedload(Listing.property))
+        .filter(Listing.is_active == True)  # noqa: E712
+    )
+    if property_id:
+        q = q.filter(Listing.property_id == property_id)
     if listing_id:
         q = q.filter(Listing.id == listing_id)
     if type:
@@ -227,35 +284,30 @@ def list_listings(
     return results
 
 
-@app.get("/api/listings/meta")
-def listings_meta(db: Session = Depends(get_db)):
-    """Краткий список активных объектов для фильтра «Объект» на главной."""
-    rows = (
-        db.query(Listing.id, Listing.title, Listing.address, Listing.property_type)
-        .filter(Listing.is_active == True)  # noqa: E712
-        .order_by(Listing.title)
-        .all()
-    )
-    return [
-        {"id": r[0], "title": r[1], "address": r[2], "property_type": r[3]}
-        for r in rows
-    ]
-
-
 @app.get("/api/listings/{listing_id}")
 def get_listing(listing_id: int, db: Session = Depends(get_db)):
-    l = db.query(Listing).get(listing_id)
+    l = db.query(Listing).options(joinedload(Listing.property)).get(listing_id)
     if not l or not l.is_active:
         raise HTTPException(404, "Объект не найден")
     return ListingOut.from_orm_any(l)
 
 
+def validate_property_ref(db: Session, data: dict) -> None:
+    """Не даём повесить номер на несуществующий объект."""
+    pid = data.get("property_id")
+    if pid and not db.query(Property).get(pid):
+        raise HTTPException(400, f"Объект размещения #{pid} не найден")
+
+
 @app.post("/api/listings", response_model=ListingOut, status_code=201)
 def create_listing(payload: ListingCreate, db: Session = Depends(get_db)):
-    l = Listing(**listing_payload_to_fields(payload))
+    data = listing_payload_to_fields(payload)
+    validate_property_ref(db, data)
+    l = Listing(**data)
     db.add(l)
     db.commit()
     db.refresh(l)
+    db.refresh(l)  # подтягивает связь property для ответа
     return ListingOut.from_orm_any(l)
 
 
@@ -264,10 +316,13 @@ def update_listing(listing_id: int, payload: ListingUpdate, db: Session = Depend
     l = db.query(Listing).get(listing_id)
     if not l:
         raise HTTPException(404, "Объект не найден")
-    for k, v in listing_payload_to_fields(payload).items():
+    data = listing_payload_to_fields(payload)
+    validate_property_ref(db, data)
+    for k, v in data.items():
         setattr(l, k, v)
     db.commit()
-    db.refresh(l)
+    db.expire_all()
+    l = db.query(Listing).options(joinedload(Listing.property)).get(listing_id)
     return ListingOut.from_orm_any(l)
 
 
