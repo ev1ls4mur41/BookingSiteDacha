@@ -24,7 +24,7 @@ class ListingBase(BaseModel):
     title: str = Field(min_length=3, max_length=200)
     description: str = ""
     property_type: str = Field(default="room", pattern="^(room|apartment)$")
-    city: str = Field(min_length=2, max_length=100)
+    city: str = Field(default="", max_length=100)
     address: str = ""
     guests: int = Field(default=2, ge=1, le=20)
     bedrooms: int = Field(default=1, ge=0, le=20)
@@ -63,7 +63,7 @@ class ListingUpdate(ListingIn):
     title: Optional[str] = Field(default=None, min_length=3, max_length=200)
     description: Optional[str] = None
     property_type: Optional[str] = Field(default=None, pattern="^(room|apartment)$")
-    city: Optional[str] = Field(default=None, min_length=2, max_length=100)
+    city: Optional[str] = Field(default=None, max_length=100)
     address: Optional[str] = None
     guests: Optional[int] = Field(default=None, ge=1, le=20)
     bedrooms: Optional[int] = Field(default=None, ge=0, le=20)
@@ -170,7 +170,7 @@ class ErrorDetail(BaseModel):
 
 class CalendarDay(BaseModel):
     date: date
-    status: str  # free | booked | past
+    status: str  # free | booked | past | today
 
 
 class AdminLogin(BaseModel):

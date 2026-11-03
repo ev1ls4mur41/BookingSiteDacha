@@ -11,6 +11,9 @@ const fmtPrice = (n) => new Intl.NumberFormat("ru-RU").format(Math.round(n)) + "
 const TYPE_LABEL = { apartment: "Квартира", room: "Номер" };
 const STATUS_LABEL = { pending: "Ожидает", confirmed: "Подтверждена", cancelled: "Отменена" };
 
+// город показываем только если он задан (у нас все объекты в одном городе)
+const locText = (l) => [l.city, l.address].filter(Boolean).join(", ");
+
 // ---------- Навигация ----------
 function showPage(page, emailForBookings) {
   ["search", "detail", "booking", "bookings"].forEach((p) =>
@@ -30,14 +33,14 @@ function showPage(page, emailForBookings) {
 $("search-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const params = new URLSearchParams();
-  const city = $("f-city").value.trim();
+  const lid = $("f-listing").value;
   const type = $("f-type").value;
   const ci = $("f-checkin").value;
   const co = $("f-checkout").value;
   const guests = $("f-guests").value;
   const maxp = $("f-maxprice").value;
 
-  if (city) params.set("city", city);
+  if (lid) params.set("listing_id", lid);
   if (type) params.set("type", type);
   if (ci) params.set("check_in", ci);
   if (co) params.set("check_out", co);
@@ -77,7 +80,7 @@ function renderListings(items) {
         <div class="card-body">
           <div class="card-type">${TYPE_LABEL[l.property_type] || ""} · до ${l.guests} гост.</div>
           <div class="card-title">${esc(l.title)}</div>
-          <div class="card-city">${esc(l.city)}, ${esc(l.address)}</div>
+          <div class="card-city">${esc(locText(l))}</div>
           <div class="card-row">
             <span class="card-rating">⭐ ${l.rating.toFixed(1)}</span>
             <span class="card-price"><b>${fmtPrice(l.price_per_night)}</b> <span>/ ночь</span></span>
@@ -115,7 +118,7 @@ async function openDetail(id) {
         <div>
           ${imgs.length ? renderGallery(imgs) : ""}
           <h2 style="margin-top:18px">${esc(currentListing.title)}</h2>
-          <div class="meta">${TYPE_LABEL[currentListing.property_type]} · ${esc(currentListing.city)}, ${esc(currentListing.address)} · ⭐ ${currentListing.rating.toFixed(1)}</div>
+          <div class="meta">${TYPE_LABEL[currentListing.property_type]} · ${esc(locText(currentListing))} · ⭐ ${currentListing.rating.toFixed(1)}</div>
           <div class="badges">
             <span class="badge">👥 До ${currentListing.guests} гостей</span>
             <span class="badge">🛏 Спален: ${currentListing.bedrooms}</span>
@@ -247,6 +250,7 @@ function renderCalendar(id) {
       <div class="cal-grid" id="cal-days"><div class="cal-loading">Загрузка занятости…</div></div>
       <div class="cal-legend">
         <span><i class="dot dot-free"></i> свободно</span>
+        <span><i class="dot dot-today"></i> сегодня</span>
         <span><i class="dot dot-booked"></i> занято</span>
         <span><i class="dot dot-sel"></i> ваш выбор</span>
       </div>
@@ -299,8 +303,12 @@ function drawCalendarGrid() {
     if (selStart && selEnd && iso >= selStart && iso < selEnd) cls += " in-range";
     if (selStart && iso === selStart) cls += " sel-edge";
     if (selEnd && iso === selEnd) cls += " sel-edge"; // день выезда подсвечиваем рамкой
-    if (st === "free") {
+    if (st === "free" || st === "today") {
+      // свободные и «сегодня» кликабельны
       html += `<button class="${cls}" onclick="calPick('${iso}')">${d}</button>`;
+    } else if (st === "booked" && selStart && !selEnd && iso > selStart) {
+      // день выезда существующей брони можно выбрать как выезд (сам он уже свободен)
+      html += `<button class="${cls} checkout-ok" onclick="calPick('${iso}')">${d}</button>`;
     } else {
       html += `<span class="${cls}">${d}</span>`;
     }
@@ -316,7 +324,7 @@ function rangeBlocked(fromIso, toIso) {
   while (d < end) {
     const iso = d.toISOString().slice(0, 10);
     const st = calDays[iso];
-    if (st === "booked" || st === "past") return true;
+    if (st === "booked" || st === "past") return true;   // "today" — тоже бронируется
     d.setDate(d.getDate() + 1);
   }
   return false;
@@ -327,7 +335,9 @@ function calPick(iso) {
     // начало нового выбора
     selStart = iso; selEnd = null;
   } else if (iso <= selStart) {
-    selStart = iso; // сдвигаем заезд
+    // дата раньше или равна заезду — это не может быть выездом:
+    // начинаем новый выбор с этой даты (раньше здесь сбрасывался выбранный выезд)
+    selStart = iso; selEnd = null;
   } else {
     // выезд — можно выбрать даже "занятый" день (это день освобождения),
     // но все ночи между должны быть свободны
@@ -378,7 +388,7 @@ function openBookingForm() {
     <img src="${l.image_url}" alt="" onerror="this.style.display='none'" />
     <div>
       <b>${esc(l.title)}</b><br/>
-      <span style="color:var(--gray)">${esc(l.city)}, ${esc(l.address)} · ${fmtPrice(l.price_per_night)}/ночь</span>
+      <span style="color:var(--gray)">${esc(locText(l))} · ${fmtPrice(l.price_per_night)}/ночь</span>
     </div>`;
 
   // даты берутся из выбора в календаре, иначе — из поиска

@@ -150,6 +150,9 @@ a.nav-btn { text-decoration: none; display: inline-block; line-height: 1.2; }
 }
 button.cal-day.free { cursor: pointer; background: #eafaf0; color: #1c7c3f; font-weight: 600; }
 button.cal-day.free:hover { background: #d2f2df; transform: scale(1.06); }
+button.cal-day.today { cursor: pointer; background: #fff4e0; color: #b25e00; font-weight: 700; box-shadow: inset 0 0 0 2px #f0a23c; }
+button.cal-day.today:hover { background: #ffe9c9; transform: scale(1.06); }
+button.cal-day.checkout-ok { cursor: pointer; opacity: .85; text-decoration: none; border: 1px dashed #b4232a; }
 .cal-day.booked { color: #b4232a; background: #ffe3e4; text-decoration: line-through; cursor: not-allowed; }
 .cal-day.past { color: #c4c4c4; cursor: default; }
 .cal-day.in-range { background: var(--primary) !important; color: #fff !important; text-decoration: none; font-weight: 700; }
