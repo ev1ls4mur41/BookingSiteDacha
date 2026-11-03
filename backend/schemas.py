@@ -14,6 +14,13 @@ class PropertyBase(BaseModel):
 class PropertyIn(PropertyBase):
     is_active: bool = True
 
+    @field_validator("name")
+    @classmethod
+    def not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Название объекта не может быть пустым")
+        return v
+
 
 class PropertyOut(PropertyBase):
     id: int
