@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>StayEasy — бронирование номеров и квартир</title>
+  <title>Отель Дача - Квартиры и номера</title>
   <link rel="stylesheet" href="/static/style.css?v=20261104b" />
+  <link rel="shortcut icon" href="/uploads/favicon.ico" type="image/x-icon">
 </head>
 <body>
   <header class="header">
     <div class="container header-inner">
       <a href="#" class="logo" onclick="showPage('search'); return false;">
-        🏠 Stay<span>Easy</span>
+        <img src="/uploads/logo.svg" height="45px" alt="Логотип сайта"> Отель<span>Дача</span>
       </a>
       <nav class="nav">
         <button class="nav-btn active" data-page="search" onclick="showPage('search')">Поиск</button>
         <button class="nav-btn" data-page="bookings" onclick="showPage('bookings')">Мои брони</button>
-        <a class="nav-btn" href="/admin">Админка</a>
       </nav>
     </div>
   </header>
@@ -24,8 +24,8 @@
     <!-- ===== Страница поиска ===== -->
     <section id="page-search">
       <div class="hero">
-        <h1>Номера и квартиры для вашего путешествия</h1>
-        <p>Бронируйте онлайн за пару минут — без предоплаты и звонков</p>
+        <h1>Номера и квартиры для вашего отдыха</h1>
+        <p>Бронируйте онлайн за пару минут</p>
       </div>
 
       <form class="search-bar" id="search-form">
@@ -122,11 +122,93 @@
 
   <footer class="footer">
     <div class="container">
-      StayEasy © 2026 — демо-сервис бронирования номеров и квартир.
-      <a href="/docs" target="_blank">API документация</a>
+      Отель Дача © 2026
     </div>
+    
   </footer>
+<!-- Баннер cookie -->
+<div id="cookie-banner" class="cookie-banner" role="dialog" aria-labelledby="cookie-title" aria-describedby="cookie-desc">
+  <div class="cookie-content">
+    <!-- Иконка cookie (SVG) -->
+    <div class="cookie-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"></path>
+        <path d="M8.5 8.5v.01"></path>
+        <path d="M16 15.5v.01"></path>
+        <path d="M12 12v.01"></path>
+        <path d="M11 17v.01"></path>
+        <path d="M7 14v.01"></path>
+      </svg>
+    </div>
+    
+    <div class="cookie-text">
+      <h3 id="cookie-title">Мы используем файлы cookie 🍪</h3>
+      <p id="cookie-desc">
+        Этот сайт использует файлы cookie для улучшения вашего опыта, анализа трафика и персонализации контента. 
+        Продолжая использовать сайт, вы соглашаетесь с нашей 
+        <a href="/privacy-policy" class="cookie-link">Политикой конфиденциальности</a>.
+      </p>
+    </div>
+  </div>
+  
+  <div class="cookie-actions">
+    <button id="cookie-accept" class="cookie-btn cookie-btn-primary">Принять все</button>
+  </div>
+</div>
 
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const banner = document.getElementById("cookie-banner");
+  const acceptBtn = document.getElementById("cookie-accept");
+  const declineBtn = document.getElementById("cookie-decline");
+  const COOKIE_KEY = "cookie_consent_given";
+
+  // Проверяем, было ли уже дано согласие
+  if (!localStorage.getItem(COOKIE_KEY)) {
+    // Небольшая задержка для плавного появления после загрузки страницы
+    setTimeout(() => {
+      banner.classList.add("is-visible");
+    }, 1000);
+  }
+
+  // Обработчик кнопки "Принять все"
+  acceptBtn.addEventListener("click", () => {
+    localStorage.setItem(COOKIE_KEY, "all");
+    hideBanner();
+    // Здесь можно инициализировать аналитику (Яндекс.Метрика, Google Analytics и т.д.)
+    console.log("Cookie accepted: All");
+  });
+
+  // Обработчик кнопки "Только необходимые"
+  declineBtn.addEventListener("click", () => {
+    localStorage.setItem(COOKIE_KEY, "necessary");
+    hideBanner();
+    console.log("Cookie accepted: Necessary only");
+  });
+
+  function hideBanner() {
+    banner.classList.remove("is-visible");
+    // Полностью удаляем из DOM после завершения анимации
+    setTimeout(() => {
+      banner.style.display = "none";
+    }, 400);
+  }
+});
+</script>
   <script src="/static/app.js?v=20261104b"></script>
+  <!-- Yandex.Metrika counter -->
+<script type="text/javascript">
+  (function(m,e,t,r,i,k,a){
+      m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+      m[i].l=1*new Date();
+      for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+      k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+  })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=114075986', 'ym');
+
+  ym(114075986, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+</script>
+<noscript><div><img src="https://mc.yandex.ru/watch/114075986" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+
+<!-- /Yandex.Metrika counter -->
 </body>
 </html>
