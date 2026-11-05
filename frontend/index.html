@@ -11,12 +11,8 @@
   <header class="header">
     <div class="container header-inner">
       <a href="#" class="logo" onclick="showPage('search'); return false;">
-        <img src="/uploads/logo.svg" height="45px" alt="Логотип сайта"> Отель<span>Дача</span>
+        <img class="logo_Img" src="/uploads/logo.svg" alt="Логотип сайта"> Отель<span>Дача</span>
       </a>
-      <nav class="nav">
-        <button class="nav-btn active" data-page="search" onclick="showPage('search')">Поиск</button>
-        <button class="nav-btn" data-page="bookings" onclick="showPage('bookings')">Мои брони</button>
-      </nav>
     </div>
   </header>
 
@@ -35,7 +31,7 @@
             <option value="">Все объекты</option>
           </select>
         </label>
-        <label>
+        <label style="display: none;">
           <span>Номер/квартира</span>
           <select id="f-listing">
             <option value="">Все номера</option>

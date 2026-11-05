@@ -30,6 +30,7 @@ body {
 .header-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
 .logo { font-size: 24px; font-weight: 700; color: var(--dark); text-decoration: none; }
 .logo span { color: var(--primary); }
+.logo_Img{height: 45px;}
 .nav { display: flex; gap: 8px; }
 .nav-btn {
   border: none; background: none; font-size: 15px; padding: 10px 14px;
@@ -200,10 +201,12 @@ table.admin-table { width: 100%; border-collapse: collapse; font-size: 14px; min
   .search-bar { grid-template-columns: 1fr 1fr; }
   .detail { grid-template-columns: 1fr; }
   .price-box { position: static; }
+  .logo_Img{height: 35px;}
 }
 @media (max-width: 560px) {
   .booking-form { grid-template-columns: 1fr; }
   .hero h1 { font-size: 26px; }
+  .logo_Img{height: 24px;}
 }
 
 /* ===== Галерея фото на странице объекта ===== */
